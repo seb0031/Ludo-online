@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Petits Chevaux Online</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<!-- ══ CHARGEMENT ══════════════════════════════════════════════════════════ -->
+<div id="screen-loading" class="screen active">
+  <div class="loading-inner">
+    <div class="horse-icon">🐴</div>
+    <h1>PETITS CHEVAUX</h1>
+    <div class="loader-bar"><div class="loader-fill"></div></div>
+    <p class="loading-sub">Chargement en cours…</p>
+  </div>
+</div>
+
+<!-- ══ MENU PRINCIPAL ══════════════════════════════════════════════════════ -->
+<div id="screen-menu" class="screen">
+  <div class="menu-bg-decor">
+    <span class="decor-piece red-piece">♟</span>
+    <span class="decor-piece blue-piece">♟</span>
+    <span class="decor-piece green-piece">♟</span>
+    <span class="decor-piece yellow-piece">♟</span>
+  </div>
+  <div class="menu-content">
+    <div class="menu-header">
+      <div class="title-horses">🐴🐴🐴🐴</div>
+      <h1 class="game-title">PETITS<br><span class="title-accent">CHEVAUX</span></h1>
+      <p class="game-subtitle">Multijoueur en ligne</p>
+    </div>
+    <div class="menu-buttons">
+      <button class="btn-fun btn-red" id="btn-create">
+        🎲 Créer une partie
+      </button>
+      <button class="btn-fun btn-blue" id="btn-join">
+        🔑 Rejoindre une partie
+      </button>
+      <button class="btn-fun btn-green" id="btn-rules">
+        📖 Règles du jeu
+      </button>
+      <button class="btn-fun btn-yellow" id="btn-options">
+        ⚙️ Options
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ CRÉER ═══════════════════════════════════════════════════════════════ -->
+<div id="screen-create" class="screen">
+  <div class="panel-container">
+    <button class="btn-back" id="back-create">← Retour</button>
+    <h2 class="panel-title">🎲 Créer une partie</h2>
+
+    <div class="form-group">
+      <label>Votre pseudo</label>
+      <input type="text" id="create-pseudo" maxlength="20" placeholder="Votre nom…" autocomplete="off">
+    </div>
+
+    <div class="form-group">
+      <label>Nombre de joueurs</label>
+      <div class="player-count-selector">
+        <button class="count-btn" data-count="2">2 🐴</button>
+        <button class="count-btn" data-count="3">3 🐴</button>
+        <button class="count-btn active" data-count="4">4 🐴</button>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Mode de jeu</label>
+      <div class="mode-selector">
+        <button class="mode-btn active" data-mode="human">👥 Joueurs humains</button>
+        <button class="mode-btn" data-mode="bot">🤖 Avec des bots</button>
+      </div>
+    </div>
+
+    <button class="btn-fun btn-red" id="btn-do-create">Créer le salon 🎉</button>
+
+    <div id="create-waiting" class="waiting-box" style="display:none">
+      <div class="room-code-display">
+        <p class="code-label">Code de la partie</p>
+        <div class="code-value" id="room-code-display">------</div>
+        <p class="code-hint">Partagez ce code avec vos amis !</p>
+        <button class="btn-copy" id="btn-copy-code">📋 Copier</button>
+      </div>
+      <div class="players-waiting" id="players-waiting-list"></div>
+      <div class="waiting-anim">
+        <span class="dot red-dot"></span>
+        <span class="dot blue-dot"></span>
+        <span class="dot green-dot"></span>
+      </div>
+      <p class="waiting-text">En attente des joueurs…</p>
+    </div>
+  </div>
+</div>
+
+<!-- ══ REJOINDRE ════════════════════════════════════════════════════════════ -->
+<div id="screen-join" class="screen">
+  <div class="panel-container">
+    <button class="btn-back" id="back-join">← Retour</button>
+    <h2 class="panel-title">🔑 Rejoindre</h2>
+    <div class="form-group">
+      <label>Votre pseudo</label>
+      <input type="text" id="join-pseudo" maxlength="20" placeholder="Votre nom…" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label>Code de la partie</label>
+      <input type="text" id="join-code" maxlength="6" placeholder="Ex: LUDO12"
+        autocomplete="off" style="text-transform:uppercase;letter-spacing:4px;font-size:1.4rem;text-align:center">
+    </div>
+    <button class="btn-fun btn-blue" id="btn-do-join">Rejoindre 🚀</button>
+    <p id="join-error" class="error-msg"></p>
+  </div>
+</div>
+
+<!-- ══ RÈGLES ════════════════════════════════════════════════════════════════ -->
+<div id="screen-rules" class="screen">
+  <div class="panel-container rules-panel">
+    <button class="btn-back" id="back-rules">← Retour</button>
+    <h2 class="panel-title">📖 Règles du jeu</h2>
+    <div class="rules-content">
+      <section class="rule-card red-card">
+        <h3>🎯 Objectif</h3>
+        <p>Être le premier à amener ses <strong>4 pions</strong> jusqu'à la case d'arrivée centrale.</p>
+      </section>
+      <section class="rule-card blue-card">
+        <h3>🎲 Tour de jeu</h3>
+        <ul>
+          <li>Lance le dé en cliquant dessus</li>
+          <li>Un <strong>6</strong> permet de sortir un pion de la base</li>
+          <li>Un <strong>6</strong> ou une capture donne un tour supplémentaire</li>
+          <li>3 six consécutifs = tour perdu</li>
+        </ul>
+      </section>
+      <section class="rule-card green-card">
+        <h3>⚔️ Captures</h3>
+        <p>Si vous arrivez sur la case d'un adversaire (hors cases étoilées ⭐), il retourne à sa base !</p>
+      </section>
+      <section class="rule-card yellow-card">
+        <h3>🏁 Arrivée</h3>
+        <p>Les pions entrent dans leur couloir final et doivent atteindre exactement la case centrale.</p>
+      </section>
+    </div>
+  </div>
+</div>
+
+<!-- ══ OPTIONS ══════════════════════════════════════════════════════════════ -->
+<div id="screen-options" class="screen">
+  <div class="panel-container">
+    <button class="btn-back" id="back-options">← Retour</button>
+    <h2 class="panel-title">⚙️ Options</h2>
+    <div class="option-row">
+      <span>🔊 Effets sonores</span>
+      <label class="toggle-switch">
+        <input type="checkbox" id="opt-sound" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div class="option-row">
+      <span>🎵 Musique</span>
+      <label class="toggle-switch">
+        <input type="checkbox" id="opt-music">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div class="option-row">
+      <span>✨ Animations</span>
+      <label class="toggle-switch">
+        <input type="checkbox" id="opt-anim" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+  </div>
+</div>
+
+<!-- ══ JEU ══════════════════════════════════════════════════════════════════ -->
+<div id="screen-game" class="screen">
+  <!-- Info joueurs haut -->
+  <div class="game-top-bar">
+    <div class="player-chip" id="chip-red">
+      <span class="chip-color red-chip"></span>
+      <span class="chip-name" id="name-red">-</span>
+    </div>
+    <div class="player-chip" id="chip-blue">
+      <span class="chip-color blue-chip"></span>
+      <span class="chip-name" id="name-blue">-</span>
+    </div>
+  </div>
+
+  <!-- Canvas du plateau -->
+  <div class="board-wrapper">
+    <div class="turn-banner" id="turn-banner">En attente…</div>
+    <canvas id="ludo-board"></canvas>
+  </div>
+
+  <!-- Info joueurs bas -->
+  <div class="game-bottom-bar">
+    <div class="player-chip" id="chip-green">
+      <span class="chip-color green-chip"></span>
+      <span class="chip-name" id="name-green">-</span>
+    </div>
+    <div class="player-chip" id="chip-yellow">
+      <span class="chip-color yellow-chip"></span>
+      <span class="chip-name" id="name-yellow">-</span>
+    </div>
+    <!-- Dé -->
+    <div class="dice-container">
+      <div class="dice" id="dice" title="Cliquer pour lancer">
+        <span id="dice-face">🎲</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODALES ═══════════════════════════════════════════════════════════════ -->
+
+<!-- Fin de partie -->
+<div id="modal-gameover" class="modal-overlay" style="display:none">
+  <div class="modal-box gameover-box">
+    <div class="gameover-trophies" id="gameover-trophies">🏆</div>
+    <h2 id="gameover-title">Fin de partie !</h2>
+    <div class="rankings" id="gameover-rankings"></div>
+    <div class="gameover-buttons">
+      <button class="btn-fun btn-red" id="btn-rematch">🔄 Rejouer</button>
+      <button class="btn-fun btn-blue" id="btn-menu-from-game">🏠 Menu</button>
+    </div>
+    <p class="rematch-status" id="rematch-status"></p>
+  </div>
+</div>
+
+<!-- Déconnexion -->
+<div id="modal-disconnect" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <div style="font-size:3rem">⚡</div>
+    <h3>Joueur déconnecté</h3>
+    <p>En attente de reconnexion…</p>
+    <div class="waiting-anim" style="justify-content:center;margin-top:12px">
+      <span class="dot red-dot"></span><span class="dot blue-dot"></span><span class="dot green-dot"></span>
+    </div>
+    <button class="btn-fun btn-blue" id="btn-disconnect-menu" style="margin-top:16px">🏠 Menu</button>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="audio.js"></script>
+<script src="menu.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
