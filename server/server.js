@@ -28,18 +28,23 @@ io.on('connection', (socket) => {
     const pc = Math.min(Math.max(parseInt(playerCount) || 4, 2), 4);
     const result = createRoomHandler(p, pc, !!withBots);
     const room = getRoom(result.code);
+
     setPlayerSocket(room, result.color, socket.id);
     socket.join(result.code);
     socket.data.roomCode = result.code;
     socket.data.color    = result.color;
+
     socket.emit('room_created', {
       code: result.code, color: result.color, token: result.token,
       pseudo: p, playerCount: pc, withBots: !!withBots,
     });
+
     console.log(`Salon ${result.code} créé par ${p} (${pc}j, bots:${withBots})`);
 
-    // Si mode solo avec bots, démarrer directement
-    if (withBots) startGame(room, result.code);
+    // Démarrage immédiat si c'est du solo avec bots
+    if (withBots) {
+      startGame(room, result.code);
+    }
   });
 
   // ── Rejoindre ────────────────────────────────────────────────────────
@@ -54,15 +59,18 @@ io.on('connection', (socket) => {
     socket.join(code_);
     socket.data.roomCode = code_;
     socket.data.color    = result.color;
+
     socket.emit('room_joined', { code: code_, color: result.color, token: result.token, pseudo: p });
 
-    // Notifier les autres
+    // Notifier tous les membres du salon
     io.to(code_).emit('player_joined', {
       color: result.color, pseudo: p,
       players: room.state.players,
     });
 
-    // Démarrer si tous les humains sont là
+    console.log(`[DEBUG] Connexion au salon ${code_}. Humains prêts :`, allHumansConnected(room));
+
+    // Lancement de la partie dès que tout le monde est connecté
     if (allHumansConnected(room) && !room.started) {
       startGame(room, code_);
     }
@@ -82,7 +90,6 @@ io.on('connection', (socket) => {
     });
     socket.to(room.code).emit('opponent_reconnected', { color });
 
-    // Vérification au cas où la reconnexion complète le salon
     if (allHumansConnected(room) && !room.started) {
       startGame(room, room.code);
     }
@@ -104,13 +111,11 @@ io.on('connection', (socket) => {
       state: serializeState(room.state),
     });
 
-    // Auto-pass ou skipped
     if (result.skipped || result.autoPass) {
       setTimeout(() => triggerBotIfNeeded(room), 600);
       return;
     }
 
-    // Auto-move si un seul coup
     if (result.autoMove) {
       setTimeout(() => {
         doMove(room, color, result.autoMove.pawnId);
@@ -143,7 +148,6 @@ io.on('connection', (socket) => {
     room.rematchVotes.add(socket.data.color);
     const humanColors = room.assignedColors.filter(c => !room.botColors.includes(c));
     if (room.rematchVotes.size >= humanColors.length) {
-      // Reset
       const { createGameState } = require('./ludoEngine');
       room.state = createGameState(room.playerCount, room.withBots, room.botColors);
       room.state.activeColors = room.assignedColors;
@@ -155,7 +159,6 @@ io.on('connection', (socket) => {
           : Object.values(room.state.players).find(p => !p.isBot)?.pseudo || 'Joueur';
         room.state.players[c] = { pseudo: room.state.players[c]?.pseudo || pseudo, isBot, connected: !isBot };
       });
-      // Remettre les pseudos humains
       humanColors.forEach(c => {
         if (room.state.players[c]) room.state.players[c].connected = true;
       });
@@ -172,13 +175,12 @@ io.on('connection', (socket) => {
 function startGame(room, code) {
   room.started = true;
   room.state.phase = 'playing';
-  room.state.turn  = room.assignedColors[0]; // rouge commence
+  room.state.turn  = room.assignedColors[0];
   room.state.diceRolled = false;
 
   io.to(code).emit('game_start', { state: serializeState(room.state) });
-  console.log(`Partie ${code} démarrée`);
+  console.log(`[🚀] Partie ${code} démarrée avec succès !`);
 
-  // Si le premier joueur est un bot
   triggerBotIfNeeded(room);
 }
 

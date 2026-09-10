@@ -41,7 +41,7 @@ function createRoom(code, hostPseudo, playerCount, withBots) {
     withBots,
     assignedColors,
     botColors,
-    slots: { red: null, blue: null, green: null, yellow: null }, // token par couleur
+    slots: { red: null, blue: null, green: null, yellow: null },
     sockets: { red: null, blue: null, green: null, yellow: null },
     state,
     createdAt: Date.now(),
@@ -115,8 +115,9 @@ function disconnectPlayer(socketId) {
 function allHumansConnected(room) {
   const humanColors = room.assignedColors.filter(c => !room.botColors.includes(c));
   return humanColors.every(c => {
-    const player = room.state.players[c];
-    return player && player.connected;
+    const isSocketOk = room.sockets[c] !== null;
+    const isPlayerOk = room.state.players[c] && room.state.players[c].connected;
+    return isSocketOk || isPlayerOk;
   });
 }
 
