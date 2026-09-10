@@ -1,6 +1,6 @@
 'use strict';
 /* ═══════════════════════════════════════════════════════════════════
-   GAME.JS — Plateau + animations case par case + gestion dé corrigée
+   GAME.JS — Plateau + Numérotation + Dé animé + Centrage des pions
    ═══════════════════════════════════════════════════════════════════ */
 const Game = (() => {
   const canvas = document.getElementById('ludo-board');
@@ -10,7 +10,7 @@ const Game = (() => {
   // ── État ─────────────────────────────────────────────────────────
   let socket = null, myColor = 'green', state = null;
   let pendingMoves = [], waitingForPawn = false;
-  let animating = false;
+  let animating = false, isDiceRolling = false;
 
   // ── Palette ───────────────────────────────────────────────────────
   const PAL = {
@@ -20,10 +20,10 @@ const Game = (() => {
     yellow: { main:'#e0b800', light:'#ffe040', dark:'#a08000', bg:'#fdf8e1', home:'#e0b800' },
   };
   const COLOR_NAMES = { green:'Vert', red:'Rouge', blue:'Bleu', yellow:'Jaune' };
+  const DICE_SYMBOLS = { 1:'⚀', 2:'⚁', 3:'⚂', 4:'⚃', 5:'⚄', 6:'⚅' };
 
-  // ── Taille ────────────────────────────────────────────────────────
-  let SZ = 40; // taille d'une cellule
-  const N  = 11; // grille 11×11 (sans les coins 6×6)
+  let SZ = 40;
+  const N  = 11;
 
   function resize() {
     const vw = window.innerWidth;
@@ -38,10 +38,6 @@ const Game = (() => {
     canvas.height = size;
     if (state) render();
   }
-
-  // ════════════════════════════════════════════════════════════════
-  // DÉFINITION DES CASES
-  // ════════════════════════════════════════════════════════════════
 
   const TRACK = [
     [0,4],
@@ -80,7 +76,6 @@ const Game = (() => {
   const START_ABS = { green:0, red:13, blue:26, yellow:39 };
   const SAFE_ABS = [0,8,13,21,26,34,39,47];
 
-  // ── Rendu complet ───────────────────────────────────────────────
   function render() {
     if (!state) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -88,10 +83,8 @@ const Game = (() => {
     drawPawns(null);
   }
 
-  // ── DESSIN DU PLATEAU ──────────────────────────────────────────
   function drawBoard() {
     const s = SZ;
-
     ctx.fillStyle = '#d0d0d0';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -129,27 +122,33 @@ const Game = (() => {
       ctx.strokeStyle = '#aaa'; ctx.lineWidth = 0.5;
       ctx.strokeRect(x, y, s, s);
 
-      if (SAFE_ABS.includes(idx) && idx !== START_ABS.green && idx !== START_ABS.red && idx !== START_ABS.blue && idx !== START_ABS.yellow) {
+      if (SAFE_ABS.includes(idx) && !Object.values(START_ABS).includes(idx)) {
         ctx.fillStyle = 'rgba(0,0,0,0.15)';
         ctx.font = `${s*0.55}px serif`;
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText('⭐', x+s/2, y+s/2);
       }
+
+      const isStart = Object.values(START_ABS).includes(idx);
+      ctx.fillStyle = isStart ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.35)';
+      ctx.font = `bold ${Math.max(9, s*0.25)}px Nunito, sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(idx, x + s/2, y + s/2);
     });
 
-    const stairColors = {
-      green:  PAL.green.main,
-      red:    PAL.red.main,
-      blue:   PAL.blue.main,
-      yellow: PAL.yellow.main,
-    };
+    const stairColors = { green: PAL.green.main, red: PAL.red.main, blue: PAL.blue.main, yellow: PAL.yellow.main };
     Object.entries(STAIRS_CELLS).forEach(([color, cells]) => {
-      cells.slice(0, 5).forEach(([c, r]) => {
+      cells.slice(0, 5).forEach(([c, r], stepIdx) => {
         const x = c*s, y = r*s;
         ctx.fillStyle = stairColors[color] + '55';
         ctx.fillRect(x, y, s, s);
         ctx.strokeStyle = stairColors[color]; ctx.lineWidth = 1;
         ctx.strokeRect(x, y, s, s);
+
+        ctx.fillStyle = stairColors[color];
+        ctx.font = `bold ${Math.max(9, s*0.25)}px Nunito, sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(stepIdx + 1, x + s/2, y + s/2);
       });
     });
 
@@ -173,16 +172,14 @@ const Game = (() => {
         const pos = getPawnCanvasPos(pawn, myColor);
         if (!pos) return;
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, SZ*0.44, 0, Math.PI*2);
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 3;
-        ctx.setLineDash([4, 3]);
-        ctx.stroke();
-        ctx.setLineDash([]);
+        ctx.arc(pos.x, pos.y, SZ*0.42, 0, Math.PI*2);
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
+        ctx.setLineDash([4, 3]); ctx.stroke(); ctx.setLineDash([]);
       });
     }
   }
 
+  // ── RECALCUL ET CENTRAGE PARFAIT DES PIONS ────────────────────────
   function getPawnCanvasPos(pawn, color) {
     const s = SZ;
     if (pawn.state === 'base') {
@@ -193,7 +190,10 @@ const Game = (() => {
       if (pawn.trackPos < 0 || pawn.trackPos > 51) return null;
       const abs = (START_ABS[color] + pawn.trackPos) % 52;
       const [c, r] = TRACK[abs];
-      const off = getStackOffset(color, abs, pawn.id);
+      
+      // Récupération des pions présents sur la même case pour équilibrer le centrage
+      const stack = getPawnsOnAbsCell(abs);
+      const off = getCenteringOffset(stack, color, pawn.id);
       return { x: c*s + s/2 + off.x, y: r*s + s/2 + off.y };
     }
     if (pawn.state === 'stairs') {
@@ -202,16 +202,38 @@ const Game = (() => {
       return { x: c*s + s/2, y: r*s + s/2 };
     }
     if (pawn.state === 'finished') {
-      const offsets = { green:[-s*0.2,-s*0.2], red:[s*0.2,-s*0.2], blue:[s*0.2,s*0.2], yellow:[-s*0.2,s*0.2] };
+      const offsets = { green:[-s*0.22,-s*0.22], red:[s*0.22,-s*0.22], blue:[s*0.22,s*0.22], yellow:[-s*0.22,s*0.22] };
       const [ox, oy] = offsets[color];
       return { x: 5*s+s/2+ox, y: 5*s+s/2+oy };
     }
     return null;
   }
 
-  function getStackOffset(color, abs, pawnId) {
-    const offsets = [{x:-5,y:-5},{x:5,y:-5},{x:-5,y:5},{x:5,y:5}];
-    return offsets[pawnId % 4] || {x:0,y:0};
+  function getPawnsOnAbsCell(abs) {
+    if (!state || !state.pawns) return [];
+    const list = [];
+    Object.entries(state.pawns).forEach(([col, pawns]) => {
+      pawns.forEach(p => {
+        if (p.state === 'track') {
+          const pAbs = (START_ABS[col] + p.trackPos) % 52;
+          if (pAbs === abs) list.push({ color: col, id: p.id });
+        }
+      });
+    });
+    return list;
+  }
+
+  function getCenteringOffset(stack, color, pawnId) {
+    if (stack.length <= 1) return { x: 0, y: 0 }; // Parfaitement centré si seul sur la case
+    const index = stack.findIndex(p => p.color === color && p.id === pawnId);
+    const d = SZ * 0.15;
+    const offsets2 = [{x: -d, y: -d}, {x: d, y: d}];
+    const offsets3 = [{x: -d, y: -d}, {x: d, y: -d}, {x: 0, y: d}];
+    const offsets4 = [{x: -d, y: -d}, {x: d, y: -d}, {x: -d, y: d}, {x: d, y: d}];
+    
+    if (stack.length === 2) return offsets2[index] || {x:0, y:0};
+    if (stack.length === 3) return offsets3[index] || {x:0, y:0};
+    return offsets4[index % 4] || {x:0, y:0};
   }
 
   function drawPawns(overridePawn) {
@@ -245,7 +267,7 @@ const Game = (() => {
   function drawPawn(x, y, color, num, isFinished) {
     const s = SZ;
     const r = s * 0.33;
-    ctx.beginPath(); ctx.arc(x+1.5, y+2, r, 0, Math.PI*2);
+    ctx.beginPath(); ctx.arc(x+1, y+1.5, r, 0, Math.PI*2);
     ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fill();
     const grad = ctx.createRadialGradient(x-r*0.3, y-r*0.3, 1, x, y, r);
     grad.addColorStop(0, PAL[color].light);
@@ -281,7 +303,6 @@ const Game = (() => {
 
       const pawn = state.pawns[color][pawnId];
       const startPos = getPawnCanvasPos(pawn, color) || targetPos;
-
       Audio.playStep();
 
       const duration = Math.min(180, 600 / steps.length);
@@ -321,7 +342,6 @@ const Game = (() => {
       for (let i = 0; i < 6; i++) {
         const angle = (i / 6) * Math.PI * 2;
         const dist = (frame / totalFrames) * SZ * 0.8;
-        ctx.globalAlpha = 1 - frame / totalFrames;
         ctx.fillStyle = '#ffd700';
         ctx.font = `${SZ * 0.3}px serif`;
         ctx.fillText('★', Math.cos(angle) * dist, Math.sin(angle) * dist);
@@ -333,8 +353,36 @@ const Game = (() => {
     requestAnimationFrame(bounce);
   }
 
+  function triggerDiceRollAnimation(finalDiceValue, onComplete) {
+    const diceEl = $('dice');
+    const faceEl = $('dice-face');
+    if (!diceEl || !faceEl) { onComplete(); return; }
+
+    isDiceRolling = true;
+    diceEl.classList.add('rolling');
+    Audio.playDiceRoll();
+
+    let rollCount = 0;
+    const maxRolls = 12;
+    const interval = setInterval(() => {
+      rollCount++;
+      const tempVal = Math.floor(Math.random() * 6) + 1;
+      faceEl.textContent = DICE_SYMBOLS[tempVal];
+
+      if (rollCount >= maxRolls) {
+        clearInterval(interval);
+        diceEl.classList.remove('rolling');
+        faceEl.textContent = DICE_SYMBOLS[finalDiceValue] || '🎲';
+        diceEl.classList.add('bounce');
+        setTimeout(() => diceEl.classList.remove('bounce'), 300);
+        isDiceRolling = false;
+        onComplete();
+      }
+    }, 55);
+  }
+
   function handleClick(e) {
-    if (!waitingForPawn || animating) return;
+    if (!waitingForPawn || animating || isDiceRolling) return;
     const rect = canvas.getBoundingClientRect();
     const touch = e.touches ? e.touches[0] : e;
     const mx = (touch.clientX - rect.left) * (canvas.width / rect.width);
@@ -384,10 +432,11 @@ const Game = (() => {
 
     const diceEl = $('dice');
     const faceEl = $('dice-face');
-    const symbols = { 1:'⚀', 2:'⚁', 3:'⚂', 4:'⚃', 5:'⚄', 6:'⚅' };
-    faceEl.textContent = state.dice ? symbols[state.dice] : '🎲';
-    const canRoll = isMyTurn && !state.diceRolled && state.phase === 'playing' && !animating;
-    diceEl.classList.toggle('disabled', !canRoll);
+    if (diceEl && faceEl && !isDiceRolling) {
+      faceEl.textContent = state.dice ? DICE_SYMBOLS[state.dice] : '🎲';
+      const canRoll = isMyTurn && !state.diceRolled && state.phase === 'playing' && !animating;
+      diceEl.classList.toggle('disabled', !canRoll);
+    }
   }
 
   function onEvent(event, data) {
@@ -395,27 +444,25 @@ const Game = (() => {
 
       case 'dice_rolled': {
         state = data.state;
-        if (data.dice === 6) Audio.playSix();
-        else Audio.playDiceRoll();
+        triggerDiceRollAnimation(data.dice, () => {
+          if (data.dice === 6) Audio.playSix();
 
-        const diceEl = $('dice');
-        if (diceEl) diceEl.classList.remove('rolling');
-
-        if (data.skipped) {
+          if (data.skipped) {
+            updateUI(); render();
+            showToast(`3 six de suite — tour perdu !`, 2200);
+            return;
+          }
+          if (data.autoPass) {
+            updateUI(); render();
+            showToast(`${COLOR_NAMES[data.color] || data.color} ne peut pas jouer !`, 1600);
+            return;
+          }
+          if (data.moves?.length > 0 && data.color === myColor) {
+            pendingMoves   = data.moves;
+            waitingForPawn = true;
+          }
           updateUI(); render();
-          showToast(`3 six de suite — tour perdu !`, 2200);
-          break;
-        }
-        if (data.autoPass) {
-          updateUI(); render();
-          showToast(`${COLOR_NAMES[data.color] || data.color} ne peut pas jouer !`, 1600);
-          break;
-        }
-        if (data.moves?.length > 0 && data.color === myColor) {
-          pendingMoves   = data.moves;
-          waitingForPawn = true;
-        }
-        updateUI(); render();
+        });
         break;
       }
 
@@ -465,7 +512,6 @@ const Game = (() => {
         $('modal-disconnect').style.display = 'flex'; break;
       case 'opponent_reconnected':
         $('modal-disconnect').style.display = 'none'; break;
-
       case 'rematch_requested':
         $('rematch-status').textContent = 'Un joueur veut rejouer !'; break;
 
@@ -523,7 +569,7 @@ const Game = (() => {
     socket  = sock;
     state   = payload.state;
     myColor = isReconnect ? payload.color : (localStorage.getItem('ludo_color') || 'green');
-    animating = false; waitingForPawn = false; pendingMoves = [];
+    animating = false; waitingForPawn = false; pendingMoves = []; isDiceRolling = false;
     window.animEnabled = $('opt-anim')?.checked !== false;
 
     resize(); updateUI(); render();
@@ -533,18 +579,15 @@ const Game = (() => {
     canvas.addEventListener('click',    handleClick);
     canvas.addEventListener('touchend', handleClick, { passive: false });
 
-    // Enregistrement sécurisé de l'évènement du dé
     const diceBtn = $('dice');
     if (diceBtn) {
       diceBtn.onclick = (e) => {
         e.preventDefault();
-        if (animating) return;
+        if (animating || isDiceRolling) return;
         Audio.init();
         if (!state || state.phase !== 'playing') return;
         if (state.turn !== myColor || state.diceRolled) return;
 
-        diceBtn.classList.add('rolling', 'disabled');
-        Audio.playDiceRoll();
         socket.emit('roll_dice');
       };
     }

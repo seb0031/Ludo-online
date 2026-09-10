@@ -4,28 +4,28 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --red:       #e02020;
-  --red-light: #ff5555;
-  --red-dark:  #a01010;
-  --blue:      #2060e0;
-  --blue-light:#5090ff;
-  --blue-dark: #1040a0;
-  --green:     #3cb043;
-  --green-light:#6dd672;
-  --green-dark:#267328;
-  --yellow:    #e0b800;
-  --yellow-light:#ffe040;
-  --yellow-dark:#a08000;
-  --bg:        #1a1a2e;
-  --bg2:       #16213e;
-  --bg3:       #0f3460;
-  --white:     #ffffff;
-  --text:      #ecf0f1;
-  --text-dim:  #95a5a6;
-  --radius:    14px;
-  --shadow:    0 8px 32px rgba(0,0,0,.5);
-  --font:      'Nunito', sans-serif;
-  --font-title:'Fredoka One', cursive;
+  --red:          #e02020;
+  --red-light:    #ff5555;
+  --red-dark:     #a01010;
+  --blue:         #2060e0;
+  --blue-light:   #5090ff;
+  --blue-dark:    #1040a0;
+  --green:        #3cb043;
+  --green-light:  #6dd672;
+  --green-dark:   #267328;
+  --yellow:       #e0b800;
+  --yellow-light: #ffe040;
+  --yellow-dark:  #a08000;
+  --bg:           #1a1a2e;
+  --bg2:          #16213e;
+  --bg3:          #0f3460;
+  --white:        #ffffff;
+  --text:         #ecf0f1;
+  --text-dim:     #95a5a6;
+  --radius:       14px;
+  --shadow:       0 8px 32px rgba(0,0,0,.5);
+  --font:         'Nunito', sans-serif;
+  --font-title:   'Fredoka One', cursive;
 }
 
 html, body {
@@ -179,34 +179,71 @@ input:checked + .toggle-slider::before { transform: translateX(24px); }
   flex-shrink: 0;
 }
 
-/* ─── DÉ — centré sous le plateau, grand et lisible ───── */
+/* ─── DÉ — STYLE ET ANIMATIONS AMÉLIORÉS ─────────────── */
 .dice-area {
   display: flex; align-items: center; justify-content: center;
   margin-top: 8px; flex-shrink: 0;
 }
 
 .dice {
+  position: relative;
   width: 72px; height: 72px;
-  background: white;
-  border-radius: 14px;
+  background: linear-gradient(145deg, #ffffff, #e6e6e6);
+  border: 3px solid #333;
+  border-radius: 16px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 3rem;
-  line-height: 1;
   cursor: pointer;
-  box-shadow: 0 5px 0 #999, 0 8px 16px rgba(0,0,0,.5);
-  transition: all .15s;
-  position: relative; top: 0;
   user-select: none; flex-shrink: 0;
+  box-shadow: 0 6px 12px rgba(0,0,0,0.35), inset 0 2px 4px rgba(255,255,255,0.9);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.2s ease, opacity 0.2s ease;
 }
-.dice:active { top: 5px; box-shadow: 0 0 0 #999, 0 2px 6px rgba(0,0,0,.4); }
-.dice.rolling { animation: diceRoll .45s ease; }
-.dice.disabled { opacity: .45; cursor: not-allowed; }
+
+#dice-face {
+  font-size: 42px;
+  line-height: 1;
+  color: #111;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.15);
+}
+
+.dice:not(.disabled):hover {
+  transform: translateY(-3px) scale(1.04);
+  box-shadow: 0 10px 18px rgba(0,0,0,0.4), inset 0 2px 4px rgba(255,255,255,1);
+}
+
+.dice:not(.disabled):active {
+  transform: translateY(2px) scale(0.96);
+  box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+}
+
+.dice.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(0.7);
+  box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+}
+
+/* Animations CSS du lancer */
+.dice.rolling {
+  animation: diceRoll 0.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.dice.bounce {
+  animation: diceBounce 0.3s ease-out;
+}
+
 @keyframes diceRoll {
-  0%  { transform: rotate(0deg) scale(1); }
-  25% { transform: rotate(-18deg) scale(1.25); }
-  50% { transform: rotate(18deg) scale(0.88); }
-  75% { transform: rotate(-10deg) scale(1.12); }
-  100%{ transform: rotate(0deg) scale(1); }
+  0%   { transform: rotate(0deg) scale(1); }
+  25%  { transform: rotate(-18deg) scale(1.15) translateY(-4px); }
+  50%  { transform: rotate(18deg) scale(1.2) translateY(-6px); }
+  75%  { transform: rotate(-12deg) scale(1.1) translateY(-2px); }
+  100% { transform: rotate(0deg) scale(1); }
+}
+
+@keyframes diceBounce {
+  0%   { transform: scale(1.25); }
+  50%  { transform: scale(0.9); }
+  100% { transform: scale(1); }
 }
 
 /* Barre joueurs bas (juste les chips verts/jaunes) */
@@ -251,9 +288,11 @@ input:checked + .toggle-slider::before { transform: translateX(24px); }
 @media (max-width: 380px) {
   .code-value { font-size: 1.8rem; letter-spacing: 6px; }
   .panel-container { padding: 16px; }
-  .dice { width: 60px; height: 60px; font-size: 2.5rem; }
+  .dice { width: 60px; height: 60px; }
+  #dice-face { font-size: 34px; }
 }
 @media (min-width: 768px) {
   .game-title { font-size: 3.5rem; }
-  .dice { width: 80px; height: 80px; font-size: 3.5rem; }
+  .dice { width: 80px; height: 80px; }
+  #dice-face { font-size: 48px; }
 }
