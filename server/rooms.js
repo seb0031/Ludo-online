@@ -114,7 +114,10 @@ function disconnectPlayer(socketId) {
 // ─── Vérifie si tous les humains sont connectés ──────────────────────────────
 function allHumansConnected(room) {
   const humanColors = room.assignedColors.filter(c => !room.botColors.includes(c));
-  return humanColors.every(c => room.sockets[c] !== null);
+  return humanColors.every(c => {
+    const player = room.state.players[c];
+    return player && player.connected;
+  });
 }
 
 function getRoom(code) { return rooms.get(code); }

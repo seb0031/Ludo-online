@@ -81,6 +81,11 @@ io.on('connection', (socket) => {
       state: serializeState(room.state),
     });
     socket.to(room.code).emit('opponent_reconnected', { color });
+
+    // Vérification au cas où la reconnexion complète le salon
+    if (allHumansConnected(room) && !room.started) {
+      startGame(room, room.code);
+    }
   });
 
   // ── Lancer le dé ────────────────────────────────────────────────────
