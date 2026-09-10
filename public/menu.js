@@ -44,6 +44,8 @@ const Menu = (() => {
 
     socket.on('game_start', (payload) => {
       Audio.playStart();
+      const waitingBox = $('create-waiting');
+      if (waitingBox) waitingBox.style.display = 'none';
       Game.init(socket, payload);
       show('screen-game');
     });
@@ -77,7 +79,6 @@ const Menu = (() => {
       $(`back-${name}`)?.addEventListener('click', () => { Audio.playClick(); show('screen-menu'); });
     });
 
-    // Nb joueurs
     document.querySelectorAll('.count-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.count-btn').forEach(b => b.classList.remove('active'));
@@ -87,7 +88,6 @@ const Menu = (() => {
       });
     });
 
-    // Mode
     document.querySelectorAll('.mode-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
@@ -97,7 +97,6 @@ const Menu = (() => {
       });
     });
 
-    // Créer
     $('btn-do-create').addEventListener('click', () => {
       const pseudo = $('create-pseudo').value.trim() || 'Joueur1';
       Audio.playClick();
@@ -108,7 +107,6 @@ const Menu = (() => {
       });
     });
 
-    // Copier code
     $('btn-copy-code').addEventListener('click', () => {
       const code = $('room-code-display').textContent;
       navigator.clipboard?.writeText(code).catch(() => {});
@@ -116,18 +114,15 @@ const Menu = (() => {
       setTimeout(() => { $('btn-copy-code').textContent = '📋 Copier'; }, 2000);
     });
 
-    // Rejoindre
     $('btn-do-join').addEventListener('click', doJoin);
     $('join-code').addEventListener('keydown', e => { if (e.key === 'Enter') doJoin(); });
     $('join-code').addEventListener('input', e => {
       e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6);
     });
 
-    // Options
     $('opt-sound').addEventListener('change', e => { Audio.setSfx(e.target.checked); Audio.playClick(); });
     $('opt-music').addEventListener('change', e => { Audio.init(); Audio.setMusic(e.target.checked); });
 
-    // Fin de partie
     $('btn-rematch').addEventListener('click', () => {
       socket.emit('request_rematch');
       $('btn-rematch').textContent = '⏳ En attente…';

@@ -42,58 +42,35 @@ const Game = (() => {
   // ════════════════════════════════════════════════════════════════
   // DÉFINITION DES CASES (grille 11×11, coins = bases 6×6 virtuels)
   // Piste commune : 52 cases, sens horaire
-  // Layout d'après l'image de référence :
-  //   col 0-3 = zone gauche, col 4 = couloir vert/jaune, col 5 = centre, col 6 = couloir rouge/bleu, col 7-10 = zone droite
-  //   row 0-3 = zone haute, row 4 = couloir vert/rouge, row 5 = centre, row 6 = couloir bleu/jaune, row 7-10 = zone basse
   // ════════════════════════════════════════════════════════════════
 
-  // Piste commune — 52 cases [col, row]
-  // Sens horaire depuis la case de départ verte (col=0, row=4)
   const TRACK = [
-    // Vert démarre ici (case 0)
     [0,4],
-    // Monte col 1-4, row=4
     [1,4],[2,4],[3,4],[4,4],
-    // Vire en haut col=4
     [4,3],[4,2],[4,1],[4,0],
-    // Traverse en haut row=0
     [5,0],
-    // Descend col=6
     [6,0],[6,1],[6,2],[6,3],
-    // Rouge démarre ici (case 13)
     [6,4],
-    // Continue col=7-10
     [7,4],[8,4],[9,4],[10,4],
-    // Vire droite row=5
     [10,5],
-    // Remonte col=10
     [10,6],[9,6],[8,6],[7,6],
-    // Bleu démarre ici (case 26) — correction : bleu en bas-droite
     [6,6],
-    // Continue bas col=6
     [6,7],[6,8],[6,9],[6,10],
-    // Traverse en bas row=10
     [5,10],
-    // Monte col=4
     [4,10],[4,9],[4,8],[4,7],
-    // Jaune démarre ici (case 39)
     [4,6],
-    // Continue gauche row=6
     [3,6],[2,6],[1,6],[0,6],
-    // Vire gauche col=0
     [0,5],
-    // Retour vers case 0
-    [0,4], // case 52 = case 0 (boucle)
+    [0,4],
   ].slice(0, 52);
 
-  // Couloirs finaux (6 cases vers le centre) [col, row]
   const STAIRS = {
-    green:  [[1,5],[2,5],[3,5],[4,5],[5,5],[5,5]], // vers centre
+    green:  [[1,5],[2,5],[3,5],[4,5],[5,5],[5,5]],
     red:    [[5,1],[5,2],[5,3],[5,4],[5,5],[5,5]],
     blue:   [[9,5],[8,5],[7,5],[6,5],[5,5],[5,5]],
     yellow: [[5,9],[5,8],[5,7],[5,6],[5,5],[5,5]],
   };
-  // Cases escalier réelles (sans la dernière qui est le centre)
+
   const STAIRS_CELLS = {
     green:  [[1,5],[2,5],[3,5],[4,5],[5,5]],
     red:    [[5,1],[5,2],[5,3],[5,4],[5,5]],
@@ -101,7 +78,6 @@ const Game = (() => {
     yellow: [[5,9],[5,8],[5,7],[5,6],[5,5]],
   };
 
-  // Positions visuelles des pions dans la base (4 slots par couleur)
   const BASE_SLOTS = {
     green:  [[1,1],[2,1],[1,2],[2,2]],
     red:    [[8,1],[9,1],[8,2],[9,2]],
@@ -109,10 +85,7 @@ const Game = (() => {
     yellow: [[1,8],[2,8],[1,9],[2,9]],
   };
 
-  // ── Couleurs des cases de la piste ──────────────────────────────
-  // Cases de départ (colorées)
   const START_ABS = { green:0, red:13, blue:26, yellow:39 };
-  // Cases safe (étoilées) — absolues
   const SAFE_ABS = [0,8,13,21,26,34,39,47];
 
   // ── Rendu complet ───────────────────────────────────────────────
@@ -127,11 +100,9 @@ const Game = (() => {
   function drawBoard() {
     const s = SZ;
 
-    // Fond gris clair global
     ctx.fillStyle = '#d0d0d0';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // ── Zones de base (coins) ──────────────────────────────────
     const bases = {
       green:  {x:0,   y:0,   w:4*s, h:4*s, color:'green'},
       red:    {x:7*s, y:0,   w:4*s, h:4*s, color:'red'},
@@ -139,18 +110,14 @@ const Game = (() => {
       yellow: {x:0,   y:7*s, w:4*s, h:4*s, color:'yellow'},
     };
     Object.entries(bases).forEach(([color, b]) => {
-      // Fond coloré
       ctx.fillStyle = PAL[color].bg;
       ctx.fillRect(b.x, b.y, b.w, b.h);
-      // Bordure
       ctx.strokeStyle = PAL[color].dark;
       ctx.lineWidth = 2;
       ctx.strokeRect(b.x+1, b.y+1, b.w-2, b.h-2);
-      // Grand cercle coloré
       const cx = b.x + b.w/2, cy = b.y + b.h/2, r = b.w/2 - s*0.3;
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
       ctx.fillStyle = PAL[color].main; ctx.fill();
-      // 4 slots blancs dans le cercle
       BASE_SLOTS[color].forEach(([sc, sr]) => {
         const px = sc*s + s/2, py = sr*s + s/2;
         ctx.beginPath(); ctx.arc(px, py, s*0.32, 0, Math.PI*2);
@@ -158,10 +125,8 @@ const Game = (() => {
       });
     });
 
-    // ── Cases de la piste commune ──────────────────────────────
     TRACK.forEach(([c, r], idx) => {
       const x = c*s, y = r*s;
-      // Couleur de la case
       let bg = '#ffffff';
       if (idx === START_ABS.green)  bg = PAL.green.main;
       if (idx === START_ABS.red)    bg = PAL.red.main;
@@ -172,7 +137,6 @@ const Game = (() => {
       ctx.strokeStyle = '#aaa'; ctx.lineWidth = 0.5;
       ctx.strokeRect(x, y, s, s);
 
-      // Étoile sur cases safe
       if (SAFE_ABS.includes(idx) && idx !== START_ABS.green && idx !== START_ABS.red && idx !== START_ABS.blue && idx !== START_ABS.yellow) {
         ctx.fillStyle = 'rgba(0,0,0,0.15)';
         ctx.font = `${s*0.55}px serif`;
@@ -181,7 +145,6 @@ const Game = (() => {
       }
     });
 
-    // ── Couloirs finaux (escaliers colorés) ──────────────────
     const stairColors = {
       green:  PAL.green.main,
       red:    PAL.red.main,
@@ -198,9 +161,7 @@ const Game = (() => {
       });
     });
 
-    // ── Zone centrale (case d'arrivée) ─────────────────────────
     const cx = 5*s, cy = 5*s, cw = s, ch = s;
-    // 4 triangles colorés
     ctx.fillStyle = PAL.green.main;
     ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx+cw/2, cy+ch/2); ctx.lineTo(cx, cy+ch); ctx.closePath(); ctx.fill();
     ctx.fillStyle = PAL.red.main;
@@ -209,12 +170,10 @@ const Game = (() => {
     ctx.beginPath(); ctx.moveTo(cx+cw, cy); ctx.lineTo(cx+cw/2, cy+ch/2); ctx.lineTo(cx+cw, cy+ch); ctx.closePath(); ctx.fill();
     ctx.fillStyle = PAL.yellow.main;
     ctx.beginPath(); ctx.moveTo(cx, cy+ch); ctx.lineTo(cx+cw/2, cy+ch/2); ctx.lineTo(cx+cw, cy+ch); ctx.closePath(); ctx.fill();
-    // Étoile centrale
     ctx.font = `${s*0.7}px serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText('⭐', cx+cw/2, cy+ch/2);
 
-    // ── Highlight des pions jouables ──────────────────────────
     if (waitingForPawn && pendingMoves.length > 0) {
       const playableIds = pendingMoves.map(m => m.pawnId);
       state.pawns[myColor]?.forEach(pawn => {
@@ -232,7 +191,6 @@ const Game = (() => {
     }
   }
 
-  // ── Position canvas d'un pion ──────────────────────────────────
   function getPawnCanvasPos(pawn, color) {
     const s = SZ;
     if (pawn.state === 'base') {
@@ -243,7 +201,6 @@ const Game = (() => {
       if (pawn.trackPos < 0 || pawn.trackPos > 51) return null;
       const abs = (START_ABS[color] + pawn.trackPos) % 52;
       const [c, r] = TRACK[abs];
-      // Offset si plusieurs pions sur la même case
       const off = getStackOffset(color, abs, pawn.id);
       return { x: c*s + s/2 + off.x, y: r*s + s/2 + off.y };
     }
@@ -253,7 +210,6 @@ const Game = (() => {
       return { x: c*s + s/2, y: r*s + s/2 };
     }
     if (pawn.state === 'finished') {
-      // Centre avec offset par couleur
       const offsets = { green:[-s*0.2,-s*0.2], red:[s*0.2,-s*0.2], blue:[s*0.2,s*0.2], yellow:[-s*0.2,s*0.2] };
       const [ox, oy] = offsets[color];
       return { x: 5*s+s/2+ox, y: 5*s+s/2+oy };
@@ -266,23 +222,19 @@ const Game = (() => {
     return offsets[pawnId % 4] || {x:0,y:0};
   }
 
-  // ── Dessin de tous les pions ───────────────────────────────────
   function drawPawns(overridePawn) {
     if (!state) return;
     Object.entries(state.pawns).forEach(([color, pawns]) => {
       pawns.forEach(pawn => {
-        // Ne pas dessiner le pion en cours d'animation
         if (overridePawn && overridePawn.color === color && overridePawn.id === pawn.id) return;
         const pos = getPawnCanvasPos(pawn, color);
         if (pos) drawPawn(pos.x, pos.y, color, pawn.id + 1, pawn.state === 'finished');
       });
     });
-    // Dessiner le pion animé par-dessus
     if (overridePawn) {
       drawPawn(overridePawn.x, overridePawn.y, overridePawn.color, overridePawn.id + 1, false);
     }
 
-    // Pulsation pour les pions jouables
     if (waitingForPawn) {
       const playableIds = pendingMoves.map(m => m.pawnId);
       state.pawns[myColor]?.forEach(pawn => {
@@ -301,10 +253,8 @@ const Game = (() => {
   function drawPawn(x, y, color, num, isFinished) {
     const s = SZ;
     const r = s * 0.33;
-    // Ombre
     ctx.beginPath(); ctx.arc(x+1.5, y+2, r, 0, Math.PI*2);
     ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fill();
-    // Corps
     const grad = ctx.createRadialGradient(x-r*0.3, y-r*0.3, 1, x, y, r);
     grad.addColorStop(0, PAL[color].light);
     grad.addColorStop(1, PAL[color].dark);
@@ -312,16 +262,12 @@ const Game = (() => {
     ctx.fillStyle = grad; ctx.fill();
     ctx.strokeStyle = isFinished ? '#ffd700' : 'rgba(255,255,255,0.9)';
     ctx.lineWidth = isFinished ? 2.5 : 1.8; ctx.stroke();
-    // Numéro
     ctx.fillStyle = '#fff';
     ctx.font = `bold ${Math.max(8, s*0.26)}px Nunito,sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(num, x, y);
   }
 
-  // ══════════════════════════════════════════════════════════════
-  // ANIMATION case par case
-  // ══════════════════════════════════════════════════════════════
   function animatePawnSteps(color, pawnId, steps, callback) {
     if (!steps || steps.length === 0 || !window.animEnabled) { callback(); return; }
     let stepIdx = 0;
@@ -331,7 +277,6 @@ const Game = (() => {
       const step = steps[stepIdx];
       stepIdx++;
 
-      // Position de la case intermédiaire
       const s = SZ;
       let targetPos;
       if (step.type === 'track') {
@@ -342,14 +287,11 @@ const Game = (() => {
         targetPos = { x: 5*s + s/2, y: 5*s + s/2 };
       }
 
-      // Source = position actuelle du pion dans l'état
       const pawn = state.pawns[color][pawnId];
       const startPos = getPawnCanvasPos(pawn, color) || targetPos;
 
-      // Son à chaque pas
       Audio.playStep();
 
-      // Animation glissé vers la case
       const duration = Math.min(180, 600 / steps.length);
       const start = performance.now();
       const override = { color, id: pawnId, x: startPos.x, y: startPos.y };
@@ -370,7 +312,6 @@ const Game = (() => {
     doStep();
   }
 
-  // ── Animation collision (rebond + son) ───────────────────────
   function animateCapture(x, y, color, callback) {
     Audio.playCapture();
     let frame = 0;
@@ -380,13 +321,11 @@ const Game = (() => {
       const scale = 1 + Math.sin(frame / totalFrames * Math.PI) * 0.5;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       drawBoard(); drawPawns(null);
-      // Pion capturé qui gonfle/disparaît
       ctx.save();
       ctx.translate(x, y);
       ctx.scale(scale, scale);
       ctx.globalAlpha = 1 - frame / totalFrames;
       drawPawn(0, 0, color, '✕', false);
-      // Étoiles
       for (let i = 0; i < 6; i++) {
         const angle = (i / 6) * Math.PI * 2;
         const dist = (frame / totalFrames) * SZ * 0.8;
@@ -402,7 +341,6 @@ const Game = (() => {
     requestAnimationFrame(bounce);
   }
 
-  // ── Gestion des clics ─────────────────────────────────────────
   function handleClick(e) {
     if (!waitingForPawn || animating) return;
     const rect = canvas.getBoundingClientRect();
@@ -428,7 +366,6 @@ const Game = (() => {
     }
   }
 
-  // ── Mise à jour UI ────────────────────────────────────────────
   function updateUI() {
     if (!state) return;
     ['green','red','blue','yellow'].forEach(c => {
@@ -453,7 +390,6 @@ const Game = (() => {
       banner.className   = isBot ? 'turn-banner bot-turn' : 'turn-banner';
     }
 
-    // Dé
     const diceEl = $('dice');
     const faceEl = $('dice-face');
     const symbols = { 1:'⚀', 2:'⚁', 3:'⚂', 4:'⚃', 5:'⚄', 6:'⚅' };
@@ -462,7 +398,6 @@ const Game = (() => {
     diceEl.classList.toggle('disabled', !canRoll);
   }
 
-  // ── Événements serveur ────────────────────────────────────────
   function onEvent(event, data) {
     switch (event) {
 
@@ -498,15 +433,12 @@ const Game = (() => {
         waitingForPawn = false;
         pendingMoves   = [];
 
-        // Animation déplacement
         animatePawnSteps(color, pawnId, steps || [], () => {
-          // Animations captures
           if (captures && captures.length > 0) {
             let captureIdx = 0;
             function doNextCapture() {
               if (captureIdx >= captures.length) { finishMove(); return; }
               const cap = captures[captureIdx++];
-              // Position de la case de capture (case de départ de color)
               const abs = (({ green:0, red:13, blue:26, yellow:39 })[color]);
               const [c, r] = TRACK[abs];
               animateCapture(c*SZ + SZ/2, r*SZ + SZ/2, cap.color, doNextCapture);
@@ -560,7 +492,6 @@ const Game = (() => {
     }
   }
 
-  // ── Toast ──────────────────────────────────────────────────────
   function showToast(msg, dur) {
     let t = document.getElementById('toast');
     if (!t) {
@@ -579,8 +510,6 @@ const Game = (() => {
     t._h = setTimeout(() => { t.style.opacity = '0'; }, dur || 2000);
   }
 
-  // ── Fin de partie ─────────────────────────────────────────────
-  const COLOR_NAMES = { green:'Vert', red:'Rouge', blue:'Bleu', yellow:'Jaune' };
   function showGameOver(data) {
     const medals = ['🥇','🥈','🥉','4️⃣'];
     const dotColor = { green:'#3cb043', red:'#e02020', blue:'#2060e0', yellow:'#e0b800' };
@@ -597,7 +526,6 @@ const Game = (() => {
     $('modal-gameover').style.display = 'flex';
   }
 
-  // ── Init ──────────────────────────────────────────────────────
   function init(sock, payload, isReconnect) {
     socket  = sock;
     state   = payload.state;
