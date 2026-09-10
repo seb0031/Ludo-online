@@ -1,403 +1,451 @@
 'use strict';
+/* ═══════════════════════════════════════════════════════════════════
+   GAME.JS — Plateau fidèle + animations case par case + sons
+   ═══════════════════════════════════════════════════════════════════ */
 const Game = (() => {
   const canvas = document.getElementById('ludo-board');
   const ctx    = canvas.getContext('2d');
   function $(id) { return document.getElementById(id); }
 
-  // ── État ────────────────────────────────────────────────────────────
-  let socket = null, myColor = 'red', state = null;
-  let pendingMoves = [], diceValue = null, waitingForPawn = false;
-  let animEnabled = true;
+  // ── État ─────────────────────────────────────────────────────────
+  let socket = null, myColor = 'green', state = null;
+  let pendingMoves = [], waitingForPawn = false;
+  let animating = false;
 
-  // ── Couleurs ─────────────────────────────────────────────────────────
-  const PALETTE = {
-    red:    { main:'#e74c3c', light:'#ff6b5b', dark:'#c0392b', bg:'#fdedec' },
-    blue:   { main:'#3498db', light:'#5dade2', dark:'#2980b9', bg:'#ebf5fb' },
-    green:  { main:'#2ecc71', light:'#58d68d', dark:'#27ae60', bg:'#eafaf1' },
-    yellow: { main:'#f1c40f', light:'#f7dc6f', dark:'#d4ac0d', bg:'#fefde7' },
+  // ── Palette ───────────────────────────────────────────────────────
+  const PAL = {
+    green:  { main:'#3cb043', light:'#6dd672', dark:'#267328', bg:'#e8f8e9', home:'#3cb043' },
+    red:    { main:'#e02020', light:'#ff5555', dark:'#a01010', bg:'#fdeaea', home:'#e02020' },
+    blue:   { main:'#2060e0', light:'#5090ff', dark:'#1040a0', bg:'#eaeffd', home:'#2060e0' },
+    yellow: { main:'#e0b800', light:'#ffe040', dark:'#a08000', bg:'#fdf8e1', home:'#e0b800' },
   };
-  const COLOR_NAMES = { red:'Rouge', blue:'Bleu', green:'Vert', yellow:'Jaune' };
+  const COLOR_NAMES = { green:'Vert', red:'Rouge', blue:'Bleu', yellow:'Jaune' };
 
-  // ── Plateau 15x15 ─────────────────────────────────────────────────────
-  // Le plateau des petits chevaux est une grille 15×15
-  // Cases importantes (coordonnées col, row) :
-  const BOARD_SIZE = 15;
-  let CELL = 30; // taille d'une cellule en px
+  // ── Taille ────────────────────────────────────────────────────────
+  let SZ = 40; // taille d'une cellule
+  const N  = 11; // grille 11×11 (sans les coins 6×6)
 
-  // ─── Définition de la piste (cases communes, sens horaire depuis rouge) ────
-  // 52 cases numérotées 0-51, positions sur la grille 15x15
-  const TRACK = [
-    // Côté rouge (bas-gauche) → vers bas
-    [6,13],[6,12],[6,11],[6,10],[6,9],
-    // Virage bas-gauche
-    [6,8],[5,8],[4,8],[3,8],[2,8],[1,8],
-    // Côté bleu (gauche) → vers haut ... mais on simplifie avec un tableau plat
-    [0,8],[0,7],[0,6],
-    // Haut-gauche
-    [1,6],[2,6],[3,6],[4,6],[5,6],
-    [6,6],[6,5],[6,4],[6,3],[6,2],[6,1],[6,0],
-    // Côté vert (haut) → vers droite
-    [7,0],[8,0],
-    [8,1],[8,2],[8,3],[8,4],[8,5],
-    [8,6],[9,6],[10,6],[11,6],[12,6],[13,6],[14,6],
-    // Côté jaune (droite) → vers bas
-    [14,7],[14,8],
-    [13,8],[12,8],[11,8],[10,8],[9,8],
-    [8,8],[8,9],[8,10],[8,11],[8,12],[8,13],[8,14],
-    // Bas → vers gauche
-    [7,14],
-  ];
-
-  // Couloirs finaux (6 cases chacun, vers le centre)
-  const HOME_TRACKS = {
-    red:    [[7,13],[7,12],[7,11],[7,10],[7,9],[7,8]],
-    blue:   [[1,7],[2,7],[3,7],[4,7],[5,7],[6,7]],
-    green:  [[7,1],[7,2],[7,3],[7,4],[7,5],[7,6]],
-    yellow: [[13,7],[12,7],[11,7],[10,7],[9,7],[8,7]],
-  };
-
-  // Bases (4 pions par couleur, positions fixes)
-  const BASES = {
-    red:    [[1,10],[2,10],[1,11],[2,11]],
-    blue:   [[1,1],[2,1],[1,2],[2,2]],
-    green:  [[10,1],[11,1],[10,2],[11,2]],
-    yellow: [[10,10],[11,10],[10,11],[11,11]],
-  };
-
-  // Cases safe (étoilées)
-  const SAFE_TRACK_IDX = [0,8,13,21,26,34,39,47];
-
-  // ── Calcul taille canvas ───────────────────────────────────────────────
   function resize() {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const barH = 58;
+    const topBarH = parseInt(getComputedStyle(document.querySelector('.game-top-bar')).height) || 52;
+    const botBarH = parseInt(getComputedStyle(document.querySelector('.game-bottom-bar')).height) || 80;
     const bannerH = 36;
-    const available = Math.min(vw - 8, vh - barH * 2 - bannerH - 16);
-    CELL = Math.floor(available / BOARD_SIZE);
-    const size = CELL * BOARD_SIZE;
+    const available = Math.min(vw - 8, vh - topBarH - botBarH - bannerH - 20);
+    SZ = Math.max(20, Math.floor(available / N));
+    const size = SZ * N;
     canvas.width  = size;
     canvas.height = size;
     if (state) render();
   }
 
-  // ── Rendu complet ──────────────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════
+  // DÉFINITION DES CASES (grille 11×11, coins = bases 6×6 virtuels)
+  // Piste commune : 52 cases, sens horaire
+  // Layout d'après l'image de référence :
+  //   col 0-3 = zone gauche, col 4 = couloir vert/jaune, col 5 = centre, col 6 = couloir rouge/bleu, col 7-10 = zone droite
+  //   row 0-3 = zone haute, row 4 = couloir vert/rouge, row 5 = centre, row 6 = couloir bleu/jaune, row 7-10 = zone basse
+  // ════════════════════════════════════════════════════════════════
+
+  // Piste commune — 52 cases [col, row]
+  // Sens horaire depuis la case de départ verte (col=0, row=4)
+  const TRACK = [
+    // Vert démarre ici (case 0)
+    [0,4],
+    // Monte col 1-4, row=4
+    [1,4],[2,4],[3,4],[4,4],
+    // Vire en haut col=4
+    [4,3],[4,2],[4,1],[4,0],
+    // Traverse en haut row=0
+    [5,0],
+    // Descend col=6
+    [6,0],[6,1],[6,2],[6,3],
+    // Rouge démarre ici (case 13)
+    [6,4],
+    // Continue col=7-10
+    [7,4],[8,4],[9,4],[10,4],
+    // Vire droite row=5
+    [10,5],
+    // Remonte col=10
+    [10,6],[9,6],[8,6],[7,6],
+    // Bleu démarre ici (case 26) — correction : bleu en bas-droite
+    [6,6],
+    // Continue bas col=6
+    [6,7],[6,8],[6,9],[6,10],
+    // Traverse en bas row=10
+    [5,10],
+    // Monte col=4
+    [4,10],[4,9],[4,8],[4,7],
+    // Jaune démarre ici (case 39)
+    [4,6],
+    // Continue gauche row=6
+    [3,6],[2,6],[1,6],[0,6],
+    // Vire gauche col=0
+    [0,5],
+    // Retour vers case 0
+    [0,4], // case 52 = case 0 (boucle)
+  ].slice(0, 52);
+
+  // Couloirs finaux (6 cases vers le centre) [col, row]
+  const STAIRS = {
+    green:  [[1,5],[2,5],[3,5],[4,5],[5,5],[5,5]], // vers centre
+    red:    [[5,1],[5,2],[5,3],[5,4],[5,5],[5,5]],
+    blue:   [[9,5],[8,5],[7,5],[6,5],[5,5],[5,5]],
+    yellow: [[5,9],[5,8],[5,7],[5,6],[5,5],[5,5]],
+  };
+  // Cases escalier réelles (sans la dernière qui est le centre)
+  const STAIRS_CELLS = {
+    green:  [[1,5],[2,5],[3,5],[4,5],[5,5]],
+    red:    [[5,1],[5,2],[5,3],[5,4],[5,5]],
+    blue:   [[9,5],[8,5],[7,5],[6,5],[5,5]],
+    yellow: [[5,9],[5,8],[5,7],[5,6],[5,5]],
+  };
+
+  // Positions visuelles des pions dans la base (4 slots par couleur)
+  const BASE_SLOTS = {
+    green:  [[1,1],[2,1],[1,2],[2,2]],
+    red:    [[8,1],[9,1],[8,2],[9,2]],
+    blue:   [[8,8],[9,8],[8,9],[9,9]],
+    yellow: [[1,8],[2,8],[1,9],[2,9]],
+  };
+
+  // ── Couleurs des cases de la piste ──────────────────────────────
+  // Cases de départ (colorées)
+  const START_ABS = { green:0, red:13, blue:26, yellow:39 };
+  // Cases safe (étoilées) — absolues
+  const SAFE_ABS = [0,8,13,21,26,34,39,47];
+
+  // ── Rendu complet ───────────────────────────────────────────────
   function render() {
     if (!state) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     drawBoard();
-    drawPawns();
+    drawPawns(null);
   }
 
-  // ── Dessin du plateau ──────────────────────────────────────────────────
+  // ── DESSIN DU PLATEAU ──────────────────────────────────────────
   function drawBoard() {
-    const c = CELL;
+    const s = SZ;
 
-    // Fond général blanc
-    ctx.fillStyle = '#f8f9fa';
+    // Fond gris clair global
+    ctx.fillStyle = '#d0d0d0';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Grille légère
-    ctx.strokeStyle = 'rgba(0,0,0,.08)';
-    ctx.lineWidth = .5;
-    for (let i = 0; i <= BOARD_SIZE; i++) {
-      ctx.beginPath(); ctx.moveTo(i*c, 0); ctx.lineTo(i*c, canvas.height); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0, i*c); ctx.lineTo(canvas.width, i*c); ctx.stroke();
+    // ── Zones de base (coins) ──────────────────────────────────
+    const bases = {
+      green:  {x:0,   y:0,   w:4*s, h:4*s, color:'green'},
+      red:    {x:7*s, y:0,   w:4*s, h:4*s, color:'red'},
+      blue:   {x:7*s, y:7*s, w:4*s, h:4*s, color:'blue'},
+      yellow: {x:0,   y:7*s, w:4*s, h:4*s, color:'yellow'},
+    };
+    Object.entries(bases).forEach(([color, b]) => {
+      // Fond coloré
+      ctx.fillStyle = PAL[color].bg;
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+      // Bordure
+      ctx.strokeStyle = PAL[color].dark;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(b.x+1, b.y+1, b.w-2, b.h-2);
+      // Grand cercle coloré
+      const cx = b.x + b.w/2, cy = b.y + b.h/2, r = b.w/2 - s*0.3;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
+      ctx.fillStyle = PAL[color].main; ctx.fill();
+      // 4 slots blancs dans le cercle
+      BASE_SLOTS[color].forEach(([sc, sr]) => {
+        const px = sc*s + s/2, py = sr*s + s/2;
+        ctx.beginPath(); ctx.arc(px, py, s*0.32, 0, Math.PI*2);
+        ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fill();
+      });
+    });
+
+    // ── Cases de la piste commune ──────────────────────────────
+    TRACK.forEach(([c, r], idx) => {
+      const x = c*s, y = r*s;
+      // Couleur de la case
+      let bg = '#ffffff';
+      if (idx === START_ABS.green)  bg = PAL.green.main;
+      if (idx === START_ABS.red)    bg = PAL.red.main;
+      if (idx === START_ABS.blue)   bg = PAL.blue.main;
+      if (idx === START_ABS.yellow) bg = PAL.yellow.main;
+      ctx.fillStyle = bg;
+      ctx.fillRect(x, y, s, s);
+      ctx.strokeStyle = '#aaa'; ctx.lineWidth = 0.5;
+      ctx.strokeRect(x, y, s, s);
+
+      // Étoile sur cases safe
+      if (SAFE_ABS.includes(idx) && idx !== START_ABS.green && idx !== START_ABS.red && idx !== START_ABS.blue && idx !== START_ABS.yellow) {
+        ctx.fillStyle = 'rgba(0,0,0,0.15)';
+        ctx.font = `${s*0.55}px serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('⭐', x+s/2, y+s/2);
+      }
+    });
+
+    // ── Couloirs finaux (escaliers colorés) ──────────────────
+    const stairColors = {
+      green:  PAL.green.main,
+      red:    PAL.red.main,
+      blue:   PAL.blue.main,
+      yellow: PAL.yellow.main,
+    };
+    Object.entries(STAIRS_CELLS).forEach(([color, cells]) => {
+      cells.slice(0, 5).forEach(([c, r]) => {
+        const x = c*s, y = r*s;
+        ctx.fillStyle = stairColors[color] + '55';
+        ctx.fillRect(x, y, s, s);
+        ctx.strokeStyle = stairColors[color]; ctx.lineWidth = 1;
+        ctx.strokeRect(x, y, s, s);
+      });
+    });
+
+    // ── Zone centrale (case d'arrivée) ─────────────────────────
+    const cx = 5*s, cy = 5*s, cw = s, ch = s;
+    // 4 triangles colorés
+    ctx.fillStyle = PAL.green.main;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx+cw/2, cy+ch/2); ctx.lineTo(cx, cy+ch); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = PAL.red.main;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx+cw/2, cy+ch/2); ctx.lineTo(cx+cw, cy); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = PAL.blue.main;
+    ctx.beginPath(); ctx.moveTo(cx+cw, cy); ctx.lineTo(cx+cw/2, cy+ch/2); ctx.lineTo(cx+cw, cy+ch); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = PAL.yellow.main;
+    ctx.beginPath(); ctx.moveTo(cx, cy+ch); ctx.lineTo(cx+cw/2, cy+ch/2); ctx.lineTo(cx+cw, cy+ch); ctx.closePath(); ctx.fill();
+    // Étoile centrale
+    ctx.font = `${s*0.7}px serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('⭐', cx+cw/2, cy+ch/2);
+
+    // ── Highlight des pions jouables ──────────────────────────
+    if (waitingForPawn && pendingMoves.length > 0) {
+      const playableIds = pendingMoves.map(m => m.pawnId);
+      state.pawns[myColor]?.forEach(pawn => {
+        if (!playableIds.includes(pawn.id)) return;
+        const pos = getPawnCanvasPos(pawn, myColor);
+        if (!pos) return;
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, SZ*0.44, 0, Math.PI*2);
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([4, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      });
+    }
+  }
+
+  // ── Position canvas d'un pion ──────────────────────────────────
+  function getPawnCanvasPos(pawn, color) {
+    const s = SZ;
+    if (pawn.state === 'base') {
+      const [c, r] = BASE_SLOTS[color][pawn.id];
+      return { x: c*s + s/2, y: r*s + s/2 };
+    }
+    if (pawn.state === 'track') {
+      if (pawn.trackPos < 0 || pawn.trackPos > 51) return null;
+      const abs = (START_ABS[color] + pawn.trackPos) % 52;
+      const [c, r] = TRACK[abs];
+      // Offset si plusieurs pions sur la même case
+      const off = getStackOffset(color, abs, pawn.id);
+      return { x: c*s + s/2 + off.x, y: r*s + s/2 + off.y };
+    }
+    if (pawn.state === 'stairs') {
+      if (pawn.stairsPos < 0 || pawn.stairsPos > 5) return { x: 5*s+s/2, y: 5*s+s/2 };
+      const [c, r] = STAIRS_CELLS[color][Math.min(pawn.stairsPos, 4)];
+      return { x: c*s + s/2, y: r*s + s/2 };
+    }
+    if (pawn.state === 'finished') {
+      // Centre avec offset par couleur
+      const offsets = { green:[-s*0.2,-s*0.2], red:[s*0.2,-s*0.2], blue:[s*0.2,s*0.2], yellow:[-s*0.2,s*0.2] };
+      const [ox, oy] = offsets[color];
+      return { x: 5*s+s/2+ox, y: 5*s+s/2+oy };
+    }
+    return null;
+  }
+
+  function getStackOffset(color, abs, pawnId) {
+    const offsets = [{x:-5,y:-5},{x:5,y:-5},{x:-5,y:5},{x:5,y:5}];
+    return offsets[pawnId % 4] || {x:0,y:0};
+  }
+
+  // ── Dessin de tous les pions ───────────────────────────────────
+  function drawPawns(overridePawn) {
+    if (!state) return;
+    Object.entries(state.pawns).forEach(([color, pawns]) => {
+      pawns.forEach(pawn => {
+        // Ne pas dessiner le pion en cours d'animation
+        if (overridePawn && overridePawn.color === color && overridePawn.id === pawn.id) return;
+        const pos = getPawnCanvasPos(pawn, color);
+        if (pos) drawPawn(pos.x, pos.y, color, pawn.id + 1, pawn.state === 'finished');
+      });
+    });
+    // Dessiner le pion animé par-dessus
+    if (overridePawn) {
+      drawPawn(overridePawn.x, overridePawn.y, overridePawn.color, overridePawn.id + 1, false);
     }
 
-    // Zones de base (coins colorés)
-    const baseZones = {
-      red:    {x:0,   y:9*c,  w:6*c, h:6*c},
-      blue:   {x:0,   y:0,    w:6*c, h:6*c},
-      green:  {x:9*c, y:0,    w:6*c, h:6*c},
-      yellow: {x:9*c, y:9*c,  w:6*c, h:6*c},
-    };
-    Object.entries(baseZones).forEach(([color, z]) => {
-      // Zone de base
-      ctx.fillStyle = PALETTE[color].bg;
-      ctx.fillRect(z.x, z.y, z.w, z.h);
-      ctx.strokeStyle = PALETTE[color].dark;
-      ctx.lineWidth = 2;
-      ctx.strokeRect(z.x+1, z.y+1, z.w-2, z.h-2);
-
-      // Cercle de base
-      ctx.fillStyle = PALETTE[color].main;
-      ctx.beginPath();
-      ctx.arc(z.x + z.w/2, z.y + z.h/2, z.w/2 - c*0.7, 0, Math.PI*2);
-      ctx.fill();
-      ctx.strokeStyle = PALETTE[color].dark;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      // Trous de base (4 slots)
-      BASES[color].forEach(([bc, br]) => {
-        const cx2 = bc*c + c/2, cy2 = br*c + c/2;
-        ctx.fillStyle = 'rgba(255,255,255,.4)';
-        ctx.beginPath(); ctx.arc(cx2, cy2, c*0.36, 0, Math.PI*2); ctx.fill();
+    // Pulsation pour les pions jouables
+    if (waitingForPawn) {
+      const playableIds = pendingMoves.map(m => m.pawnId);
+      state.pawns[myColor]?.forEach(pawn => {
+        if (!playableIds.includes(pawn.id)) return;
+        const pos = getPawnCanvasPos(pawn, myColor);
+        if (!pos) return;
+        const t = Date.now() / 300;
+        const r = SZ * 0.36 + Math.sin(t) * 3;
+        ctx.beginPath(); ctx.arc(pos.x, pos.y, r, 0, Math.PI*2);
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.stroke();
       });
-    });
+      requestAnimationFrame(() => { drawBoard(); drawPawns(null); });
+    }
+  }
 
-    // Centre (arrivée)
-    const center = 6*c;
-    const centerSize = 3*c;
-    // Triangle rouge (bas-gauche → centre)
-    ctx.fillStyle = PALETTE.red.main;
-    ctx.beginPath();
-    ctx.moveTo(center, center + centerSize/2);
-    ctx.lineTo(center, center + centerSize);
-    ctx.lineTo(center + centerSize/2, center + centerSize/2);
-    ctx.closePath(); ctx.fill();
-    // Triangle bleu (haut-gauche)
-    ctx.fillStyle = PALETTE.blue.main;
-    ctx.beginPath();
-    ctx.moveTo(center, center);
-    ctx.lineTo(center, center + centerSize/2);
-    ctx.lineTo(center + centerSize/2, center + centerSize/2);
-    ctx.closePath(); ctx.fill();
-    // Triangle vert (haut-droite)
-    ctx.fillStyle = PALETTE.green.main;
-    ctx.beginPath();
-    ctx.moveTo(center + centerSize, center);
-    ctx.lineTo(center + centerSize/2, center + centerSize/2);
-    ctx.lineTo(center + centerSize, center + centerSize/2);
-    ctx.closePath(); ctx.fill();
-    // Triangle jaune (bas-droite)
-    ctx.fillStyle = PALETTE.yellow.main;
-    ctx.beginPath();
-    ctx.moveTo(center + centerSize, center + centerSize/2);
-    ctx.lineTo(center + centerSize/2, center + centerSize/2);
-    ctx.lineTo(center + centerSize, center + centerSize);
-    ctx.closePath(); ctx.fill();
-    // Étoile centrale
-    ctx.fillStyle = 'rgba(255,255,255,.9)';
-    ctx.font = `${c*1.5}px serif`;
+  function drawPawn(x, y, color, num, isFinished) {
+    const s = SZ;
+    const r = s * 0.33;
+    // Ombre
+    ctx.beginPath(); ctx.arc(x+1.5, y+2, r, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fill();
+    // Corps
+    const grad = ctx.createRadialGradient(x-r*0.3, y-r*0.3, 1, x, y, r);
+    grad.addColorStop(0, PAL[color].light);
+    grad.addColorStop(1, PAL[color].dark);
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2);
+    ctx.fillStyle = grad; ctx.fill();
+    ctx.strokeStyle = isFinished ? '#ffd700' : 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = isFinished ? 2.5 : 1.8; ctx.stroke();
+    // Numéro
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.max(8, s*0.26)}px Nunito,sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('⭐', center + centerSize/2, center + centerSize/2);
+    ctx.fillText(num, x, y);
+  }
 
-    // Couloirs finaux (colorés)
-    Object.entries(HOME_TRACKS).forEach(([color, cells]) => {
-      cells.forEach(([cc, cr], i) => {
-        if (i < 5) { // pas la dernière case (centre)
-          ctx.fillStyle = `${PALETTE[color].main}44`;
-          ctx.fillRect(cc*c+1, cr*c+1, c-2, c-2);
-        }
-      });
-    });
+  // ══════════════════════════════════════════════════════════════
+  // ANIMATION case par case
+  // ══════════════════════════════════════════════════════════════
+  function animatePawnSteps(color, pawnId, steps, callback) {
+    if (!steps || steps.length === 0 || !window.animEnabled) { callback(); return; }
+    let stepIdx = 0;
 
-    // Cases de la piste commune
-    TRACK.forEach(([cc, cr], idx) => {
-      const x = cc*c, y = cr*c;
-      // Couleur de départ
-      let bg = '#ffffff';
-      if (idx === 0)  bg = PALETTE.red.bg;
-      if (idx === 13) bg = PALETTE.blue.bg;
-      if (idx === 26) bg = PALETTE.green.bg;
-      if (idx === 39) bg = PALETTE.yellow.bg;
+    function doStep() {
+      if (stepIdx >= steps.length) { callback(); return; }
+      const step = steps[stepIdx];
+      stepIdx++;
 
-      ctx.fillStyle = bg;
-      ctx.fillRect(x+1, y+1, c-2, c-2);
-
-      // Cases safe : étoile
-      if (SAFE_TRACK_IDX.includes(idx)) {
-        ctx.font = `${c*0.55}px serif`;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText('⭐', x+c/2, y+c/2);
+      // Position de la case intermédiaire
+      const s = SZ;
+      let targetPos;
+      if (step.type === 'track') {
+        const abs = (START_ABS[color] + step.rel) % 52;
+        const [c, r] = TRACK[abs];
+        targetPos = { x: c*s + s/2, y: r*s + s/2 };
+      } else {
+        targetPos = { x: 5*s + s/2, y: 5*s + s/2 };
       }
 
-      // Highlight coups possibles
-      if (waitingForPawn && pendingMoves.length > 0) {
-        // on met en valeur plus bas dans drawPawns
+      // Source = position actuelle du pion dans l'état
+      const pawn = state.pawns[color][pawnId];
+      const startPos = getPawnCanvasPos(pawn, color) || targetPos;
+
+      // Son à chaque pas
+      Audio.playStep();
+
+      // Animation glissé vers la case
+      const duration = Math.min(180, 600 / steps.length);
+      const start = performance.now();
+      const override = { color, id: pawnId, x: startPos.x, y: startPos.y };
+
+      function frame(now) {
+        const p = Math.min(1, (now - start) / duration);
+        const ease = 1 - (1 - p) * (1 - p);
+        override.x = startPos.x + (targetPos.x - startPos.x) * ease;
+        override.y = startPos.y + (targetPos.y - startPos.y) * ease;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        drawBoard();
+        drawPawns(override);
+        if (p < 1) requestAnimationFrame(frame);
+        else doStep();
       }
-    });
-
-    // Flèches directionnelles (indication de sens)
-    ctx.fillStyle = 'rgba(0,0,0,.12)';
-    ctx.font = `${c*0.5}px sans-serif`;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    // On dessine juste une flèche sur quelques cases clés
-    [[7,14,'↑'],[7,0,'↓'],[0,7,'→'],[14,7,'←']].forEach(([cc,cr,arrow]) => {
-      ctx.fillText(arrow, cc*c+c/2, cr*c+c/2);
-    });
+      requestAnimationFrame(frame);
+    }
+    doStep();
   }
 
-  // ── Dessin des pions ──────────────────────────────────────────────────
-  function drawPawns() {
-    if (!state) return;
-    const c = CELL;
-
-    // Highlight des pions jouables
-    const playablePawnIds = waitingForPawn ? pendingMoves.map(m => m.pawnId) : [];
-
-    Object.entries(state.pawns).forEach(([color, pawns]) => {
-      const pal = PALETTE[color];
-      pawns.forEach((pawn, idx) => {
-        let px, py;
-        const isPlayable = color === state.turn && playablePawnIds.includes(pawn.id) && color === myColor;
-
-        if (pawn.state === 'base') {
-          const [bc, br] = BASES[color][idx];
-          px = bc*c + c/2; py = br*c + c/2;
-        } else if (pawn.state === 'track') {
-          // Position absolue sur la piste
-          const startIdx = { red:0, blue:13, green:26, yellow:39 }[color];
-          const absIdx = (startIdx + pawn.trackPos) % 52;
-          const [tc, tr] = TRACK[absIdx];
-          // Décalage si plusieurs pions sur la même case
-          const offset = getPawnOffset(color, absIdx, pawn.id);
-          px = tc*c + c/2 + offset.x; py = tr*c + c/2 + offset.y;
-        } else if (pawn.state === 'home') {
-          const [hc, hr] = HOME_TRACKS[color][pawn.homePos];
-          px = hc*c + c/2; py = hr*c + c/2;
-        } else { // finished
-          const center = 6*c + 1.5*c;
-          const offsets = [[-c*0.25,-c*0.25],[c*0.25,-c*0.25],[-c*0.25,c*0.25],[c*0.25,c*0.25]];
-          px = center + offsets[idx][0]; py = center + offsets[idx][1];
-        }
-
-        // Halo si jouable
-        if (isPlayable) {
-          ctx.beginPath();
-          ctx.arc(px, py, c*0.42, 0, Math.PI*2);
-          ctx.fillStyle = 'rgba(255,255,255,0.35)';
-          ctx.fill();
-          ctx.strokeStyle = '#fff';
-          ctx.lineWidth = 2;
-          ctx.stroke();
-        }
-
-        // Corps du pion (cercle)
-        const r = c * 0.33;
-        ctx.beginPath();
-        ctx.arc(px, py, r, 0, Math.PI*2);
-        // Dégradé
-        const grad = ctx.createRadialGradient(px-r*0.3, py-r*0.3, 1, px, py, r);
-        grad.addColorStop(0, pal.light);
-        grad.addColorStop(1, pal.dark);
-        ctx.fillStyle = grad;
-        ctx.fill();
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-
-        // Ombre portée
-        ctx.beginPath();
-        ctx.arc(px+1, py+2, r, 0, Math.PI*2);
-        ctx.fillStyle = 'rgba(0,0,0,.18)';
-        ctx.fill();
-
-        // Re-dessiner dessus
-        ctx.beginPath();
-        ctx.arc(px, py, r, 0, Math.PI*2);
-        ctx.fillStyle = grad;
-        ctx.fill();
-        ctx.strokeStyle = pawn.state === 'finished' ? '#ffd700' : '#fff';
-        ctx.lineWidth = pawn.state === 'finished' ? 2.5 : 1.5;
-        ctx.stroke();
-
-        // Numéro du pion
-        ctx.fillStyle = '#fff';
-        ctx.font = `bold ${Math.max(9, c*0.28)}px sans-serif`;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(idx + 1, px, py);
-
-        // Animation pulsation si jouable
-        if (isPlayable) {
-          ctx.beginPath();
-          ctx.arc(px, py, r + 3 + Math.sin(Date.now() / 200) * 2, 0, Math.PI*2);
-          ctx.strokeStyle = pal.light;
-          ctx.lineWidth = 2;
-          ctx.stroke();
-        }
-      });
-    });
-
-    if (waitingForPawn) requestAnimationFrame(render);
+  // ── Animation collision (rebond + son) ───────────────────────
+  function animateCapture(x, y, color, callback) {
+    Audio.playCapture();
+    let frame = 0;
+    const totalFrames = 18;
+    function bounce() {
+      frame++;
+      const scale = 1 + Math.sin(frame / totalFrames * Math.PI) * 0.5;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawBoard(); drawPawns(null);
+      // Pion capturé qui gonfle/disparaît
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(scale, scale);
+      ctx.globalAlpha = 1 - frame / totalFrames;
+      drawPawn(0, 0, color, '✕', false);
+      // Étoiles
+      for (let i = 0; i < 6; i++) {
+        const angle = (i / 6) * Math.PI * 2;
+        const dist = (frame / totalFrames) * SZ * 0.8;
+        ctx.globalAlpha = 1 - frame / totalFrames;
+        ctx.fillStyle = '#ffd700';
+        ctx.font = `${SZ * 0.3}px serif`;
+        ctx.fillText('★', Math.cos(angle) * dist, Math.sin(angle) * dist);
+      }
+      ctx.restore();
+      if (frame < totalFrames) requestAnimationFrame(bounce);
+      else { render(); callback(); }
+    }
+    requestAnimationFrame(bounce);
   }
 
-  // Offset pour éviter la superposition de pions sur la même case
-  function getPawnOffset(color, absIdx, pawnId) {
-    const offsets = [{x:-4,y:-4},{x:4,y:-4},{x:-4,y:4},{x:4,y:4}];
-    return offsets[pawnId] || {x:0,y:0};
-  }
-
-  // ── Interaction canvas (clic sur pion) ───────────────────────────────
-  function handleCanvasClick(e) {
-    if (!waitingForPawn || !state) return;
+  // ── Gestion des clics ─────────────────────────────────────────
+  function handleClick(e) {
+    if (!waitingForPawn || animating) return;
     const rect = canvas.getBoundingClientRect();
     const touch = e.touches ? e.touches[0] : e;
-    const mx = touch.clientX - rect.left;
-    const my = touch.clientY - rect.top;
-    const c  = CELL;
+    const mx = (touch.clientX - rect.left) * (canvas.width / rect.width);
+    const my = (touch.clientY - rect.top)  * (canvas.height / rect.height);
 
-    // Chercher quel pion a été cliqué
-    const pawns = state.pawns[myColor];
-    if (!pawns) return;
     const playableIds = pendingMoves.map(m => m.pawnId);
-
+    const pawns = state.pawns[myColor] || [];
     for (const pawn of pawns) {
       if (!playableIds.includes(pawn.id)) continue;
-      let px, py;
-
-      if (pawn.state === 'base') {
-        const [bc,br] = BASES[myColor][pawn.id];
-        px = bc*c + c/2; py = br*c + c/2;
-      } else if (pawn.state === 'track') {
-        const startIdx = { red:0, blue:13, green:26, yellow:39 }[myColor];
-        const absIdx = (startIdx + pawn.trackPos) % 52;
-        const [tc,tr] = TRACK[absIdx];
-        const off = getPawnOffset(myColor, absIdx, pawn.id);
-        px = tc*c + c/2 + off.x; py = tr*c + c/2 + off.y;
-      } else if (pawn.state === 'home') {
-        const [hc,hr] = HOME_TRACKS[myColor][pawn.homePos];
-        px = hc*c + c/2; py = hr*c + c/2;
-      } else continue;
-
-      const dist = Math.sqrt((mx-px)**2 + (my-py)**2);
-      if (dist <= c * 0.5) {
+      const pos = getPawnCanvasPos(pawn, myColor);
+      if (!pos) continue;
+      const dist = Math.sqrt((mx-pos.x)**2 + (my-pos.y)**2);
+      if (dist <= SZ * 0.48) {
         waitingForPawn = false;
         pendingMoves   = [];
         socket.emit('move_pawn', { pawnId: pawn.id });
-        Audio.playMove();
+        Audio.playClick();
         render();
         return;
       }
     }
   }
 
-  // ── Dé ────────────────────────────────────────────────────────────────
-  function handleDiceClick() {
-    if (!state || state.phase !== 'playing') return;
-    if (state.turn !== myColor) return;
-    if (state.diceRolled) return;
-    Audio.playDiceRoll();
-    const dice = $('dice');
-    dice.classList.add('rolling', 'disabled');
-    setTimeout(() => dice.classList.remove('rolling'), 500);
-    socket.emit('roll_dice');
-  }
-
-  // ── Mise à jour UI ─────────────────────────────────────────────────────
+  // ── Mise à jour UI ────────────────────────────────────────────
   function updateUI() {
     if (!state) return;
-    const colors = ['red','blue','green','yellow'];
-    colors.forEach(c => {
+    ['green','red','blue','yellow'].forEach(c => {
       const chip = $(`chip-${c}`);
       if (!chip) return;
       const p = state.players[c];
-      if (!p || !state.activeColors.includes(c)) {
-        chip.style.display = 'none';
-        return;
-      }
+      if (!p || !state.activeColors.includes(c)) { chip.style.display = 'none'; return; }
       chip.style.display = 'flex';
       $(`name-${c}`).textContent = p.pseudo + (p.isBot ? ' 🤖' : '');
       chip.classList.toggle('active-turn', state.turn === c);
     });
 
-    // Bandeau de tour
     const banner = $('turn-banner');
-    const isBot  = state.players[state.turn]?.isBot;
-    if (state.turn === myColor) {
-      banner.textContent = state.diceRolled ? '👆 Choisissez un pion' : '🎲 À vous de lancer !';
+    const isMyTurn = state.turn === myColor;
+    const isBot = state.players[state.turn]?.isBot;
+    if (isMyTurn) {
+      banner.textContent = state.diceRolled ? '👆 Choisissez un cheval' : '🎲 À vous de lancer !';
       banner.className   = 'turn-banner my-turn';
     } else {
       const pseudo = state.players[state.turn]?.pseudo || '?';
@@ -406,34 +454,35 @@ const Game = (() => {
     }
 
     // Dé
-    const dice = $('dice');
-    const face = $('dice-face');
-    const diceSymbols = ['🎲','⚀','⚁','⚂','⚃','⚄','⚅'];
-    face.textContent = diceValue ? diceSymbols[diceValue] : '🎲';
-    const canRoll = state.turn === myColor && !state.diceRolled && state.phase === 'playing';
-    dice.classList.toggle('disabled', !canRoll);
+    const diceEl = $('dice');
+    const faceEl = $('dice-face');
+    const symbols = { 1:'⚀', 2:'⚁', 3:'⚂', 4:'⚃', 5:'⚄', 6:'⚅' };
+    faceEl.textContent = state.dice ? symbols[state.dice] : '🎲';
+    const canRoll = isMyTurn && !state.diceRolled && state.phase === 'playing' && !animating;
+    diceEl.classList.toggle('disabled', !canRoll);
   }
 
-  // ── Événements serveur ─────────────────────────────────────────────────
+  // ── Événements serveur ────────────────────────────────────────
   function onEvent(event, data) {
     switch (event) {
+
       case 'dice_rolled': {
-        diceValue = data.dice;
-        state     = data.state;
+        state = data.state;
         if (data.dice === 6) Audio.playSix();
         else Audio.playDiceRoll();
+        $('dice').classList.remove('rolling');
 
         if (data.skipped) {
           updateUI(); render();
-          showToast(`3 six de suite pour ${COLOR_NAMES[data.color]} — tour perdu !`, 2000);
+          showToast(`3 six de suite — tour perdu !`, 2200);
           break;
         }
         if (data.autoPass) {
           updateUI(); render();
-          showToast(`${COLOR_NAMES[data.color]} ne peut pas jouer !`, 1500);
+          showToast(`${COLOR_NAMES[data.color]} ne peut pas jouer !`, 1600);
           break;
         }
-        if (data.moves && data.moves.length > 0 && data.color === myColor) {
+        if (data.moves?.length > 0 && data.color === myColor) {
           pendingMoves   = data.moves;
           waitingForPawn = true;
         }
@@ -442,54 +491,67 @@ const Game = (() => {
       }
 
       case 'move_made': {
+        const prevState = state;
         state = data.state;
-        diceValue = null;
+        const { color, pawnId, captures, steps } = data;
+        animating = true;
         waitingForPawn = false;
         pendingMoves   = [];
 
-        if (data.captures && data.captures.length > 0) {
-          Audio.playCapture();
-          data.captures.forEach(cap => showToast(`💥 ${COLOR_NAMES[cap.color]} rentre à la maison !`, 2000));
-        }
-        if (data.replay) showToast(`${COLOR_NAMES[data.color]} rejoue !`, 1200);
+        // Animation déplacement
+        animatePawnSteps(color, pawnId, steps || [], () => {
+          // Animations captures
+          if (captures && captures.length > 0) {
+            let captureIdx = 0;
+            function doNextCapture() {
+              if (captureIdx >= captures.length) { finishMove(); return; }
+              const cap = captures[captureIdx++];
+              // Position de la case de capture (case de départ de color)
+              const abs = (({ green:0, red:13, blue:26, yellow:39 })[color]);
+              const [c, r] = TRACK[abs];
+              animateCapture(c*SZ + SZ/2, r*SZ + SZ/2, cap.color, doNextCapture);
+              showToast(`💥 ${COLOR_NAMES[cap.color]} retourne à l'écurie !`, 2000);
+            }
+            doNextCapture();
+          } else {
+            finishMove();
+          }
+        });
 
-        updateUI(); render();
-
-        // Préparer pour le prochain coup si c'est mon tour
-        if (state.turn === myColor && !state.diceRolled) {
-          // Rien, le joueur doit cliquer sur le dé
+        function finishMove() {
+          animating = false;
+          render();
+          updateUI();
+          if (data.replay) showToast(`${COLOR_NAMES[color]} rejoue !`, 1200);
         }
         break;
       }
 
       case 'game_over': {
         state = data.state;
-        updateUI(); render();
-        setTimeout(() => showGameOver(data), 800);
+        animating = false;
+        render(); updateUI();
         Audio.playVictory();
+        setTimeout(() => showGameOver(data), 800);
         break;
       }
 
       case 'opponent_disconnected':
-        $('modal-disconnect').style.display = 'flex';
-        break;
-
+        $('modal-disconnect').style.display = 'flex'; break;
       case 'opponent_reconnected':
-        $('modal-disconnect').style.display = 'none';
-        break;
+        $('modal-disconnect').style.display = 'none'; break;
 
       case 'rematch_requested':
-        $('rematch-status').textContent = 'Un joueur veut rejouer !';
-        break;
+        $('rematch-status').textContent = 'Un joueur veut rejouer !'; break;
 
-      case 'rematch_start':
       case 'game_start':
+      case 'rematch_start':
         $('modal-gameover').style.display = 'none';
         $('rematch-status').textContent   = '';
         $('btn-rematch').textContent       = '🔄 Rejouer';
         $('btn-rematch').disabled          = false;
         state          = data.state;
-        diceValue      = null;
+        animating      = false;
         waitingForPawn = false;
         pendingMoves   = [];
         updateUI(); render();
@@ -498,82 +560,72 @@ const Game = (() => {
     }
   }
 
-  // ── Toast ──────────────────────────────────────────────────────────────
-  function showToast(msg, duration) {
+  // ── Toast ──────────────────────────────────────────────────────
+  function showToast(msg, dur) {
     let t = document.getElementById('toast');
     if (!t) {
-      t = document.createElement('div');
-      t.id = 'toast';
+      t = document.createElement('div'); t.id = 'toast';
       Object.assign(t.style, {
-        position:'fixed', bottom:'80px', left:'50%', transform:'translateX(-50%)',
-        background:'rgba(0,0,0,.8)', color:'#fff', padding:'10px 20px',
-        borderRadius:'20px', zIndex:'999', fontSize:'.9rem', fontFamily:'Nunito,sans-serif',
-        fontWeight:'700', pointerEvents:'none', transition:'opacity .3s',
+        position:'fixed', bottom:'90px', left:'50%', transform:'translateX(-50%)',
+        background:'rgba(0,0,0,.82)', color:'#fff', padding:'10px 22px',
+        borderRadius:'22px', zIndex:'999', fontSize:'.9rem',
+        fontFamily:'Nunito,sans-serif', fontWeight:'700',
+        pointerEvents:'none', transition:'opacity .3s', whiteSpace:'nowrap',
       });
       document.body.appendChild(t);
     }
-    t.textContent = msg;
-    t.style.opacity = '1';
-    clearTimeout(t._hide);
-    t._hide = setTimeout(() => { t.style.opacity = '0'; }, duration || 2000);
+    t.textContent = msg; t.style.opacity = '1';
+    clearTimeout(t._h);
+    t._h = setTimeout(() => { t.style.opacity = '0'; }, dur || 2000);
   }
 
-  // ── Fin de partie ──────────────────────────────────────────────────────
+  // ── Fin de partie ─────────────────────────────────────────────
+  const COLOR_NAMES = { green:'Vert', red:'Rouge', blue:'Bleu', yellow:'Jaune' };
   function showGameOver(data) {
-    const modal      = $('modal-gameover');
-    const rankingsEl = $('gameover-rankings');
-    const title      = $('gameover-title');
-    const trophies   = $('gameover-trophies');
-    const medals     = ['🥇','🥈','🥉','4️⃣'];
-    const colorBg    = { red:'rgba(231,76,60,.25)', blue:'rgba(52,152,219,.25)', green:'rgba(46,204,113,.25)', yellow:'rgba(241,196,15,.25)' };
-    const colorDot   = { red:'#e74c3c', blue:'#3498db', green:'#2ecc71', yellow:'#f1c40f' };
-
-    trophies.textContent = data.winner === myColor ? '🏆🎉🏆' : '🎲';
-    title.textContent    = data.winner === myColor ? 'VICTOIRE !' : (data.rankings[0] && state?.players[data.rankings[0]]?.pseudo) ? `${state.players[data.rankings[0]].pseudo} gagne !` : 'Fin de partie !';
-
-    rankingsEl.innerHTML = (data.rankings || []).map((color, i) => {
-      const pseudo = state?.players[color]?.pseudo || color;
-      return `<div class="ranking-row">
-        <span class="ranking-pos">${medals[i] || (i+1)}</span>
-        <span class="ranking-color" style="background:${colorDot[color]}"></span>
-        <span class="ranking-name">${pseudo}</span>
-      </div>`;
-    }).join('');
-
-    modal.style.display = 'flex';
+    const medals = ['🥇','🥈','🥉','4️⃣'];
+    const dotColor = { green:'#3cb043', red:'#e02020', blue:'#2060e0', yellow:'#e0b800' };
+    $('gameover-trophies').textContent = data.winner === myColor ? '🏆🎉🏆' : '🎲';
+    $('gameover-title').textContent    = data.winner === myColor ? 'VICTOIRE !' :
+      `${state?.players[data.winner]?.pseudo || '?'} gagne !`;
+    $('gameover-rankings').innerHTML = (data.rankings || []).map((c, i) =>
+      `<div class="ranking-row">
+        <span class="ranking-pos">${medals[i]||i+1}</span>
+        <span class="ranking-color" style="background:${dotColor[c]}"></span>
+        <span class="ranking-name">${state?.players[c]?.pseudo || c}</span>
+      </div>`
+    ).join('');
+    $('modal-gameover').style.display = 'flex';
   }
 
-  // ── Init ────────────────────────────────────────────────────────────────
-  function init(sock, payload, isReconnect = false) {
+  // ── Init ──────────────────────────────────────────────────────
+  function init(sock, payload, isReconnect) {
     socket  = sock;
     state   = payload.state;
-    myColor = isReconnect ? payload.color : (localStorage.getItem('ludo_color') || 'red');
-    diceValue      = null;
-    waitingForPawn = false;
-    pendingMoves   = [];
-    animEnabled    = $('opt-anim')?.checked !== false;
+    myColor = isReconnect ? payload.color : (localStorage.getItem('ludo_color') || 'green');
+    animating = false; waitingForPawn = false; pendingMoves = [];
+    window.animEnabled = $('opt-anim')?.checked !== false;
 
-    resize();
-    updateUI();
-    render();
+    resize(); updateUI(); render();
 
-    // Événements canvas
-    canvas.removeEventListener('click',     handleCanvasClick);
-    canvas.removeEventListener('touchend',  handleCanvasClick);
-    canvas.addEventListener('click',     handleCanvasClick);
-    canvas.addEventListener('touchend',  handleCanvasClick, { passive: false });
+    canvas.removeEventListener('click',    handleClick);
+    canvas.removeEventListener('touchend', handleClick);
+    canvas.addEventListener('click',    handleClick);
+    canvas.addEventListener('touchend', handleClick, { passive: false });
 
-    // Dé
-    const dice = $('dice');
-    dice.onclick = () => { Audio.init(); handleDiceClick(); };
+    $('dice').onclick = () => {
+      if (animating) return;
+      Audio.init();
+      if (!state || state.phase !== 'playing') return;
+      if (state.turn !== myColor || state.diceRolled) return;
+      $('dice').classList.add('rolling','disabled');
+      Audio.playDiceRoll();
+      socket.emit('roll_dice');
+    };
 
-    // Tour bot immédiat ?
-    if (state.turn && state.players[state.turn]?.isBot) {
-      // le serveur gère le bot, on attend
-    }
+    $('opt-anim')?.addEventListener('change', e => { window.animEnabled = e.target.checked; });
   }
 
-  window.addEventListener('resize', () => { if (state) { resize(); } });
+  window.addEventListener('resize', () => { if (state) resize(); });
 
   return { init, onEvent };
 })();

@@ -1,67 +1,70 @@
 'use strict';
 
-// ─── Constantes ────────────────────────────────────────────────────────────
-const COLORS = ['red', 'blue', 'green', 'yellow'];
+// ═══════════════════════════════════════════════════════════════════════════
+// MOTEUR PETITS CHEVAUX — Règles complètes version française
+// ═══════════════════════════════════════════════════════════════════════════
 
-// Parcours complet pour chaque couleur (cases 0-51 = piste commune, 52-57 = couloir final)
-// Chaque couleur a un point de départ différent sur la piste commune
-const START_CELLS = { red: 0, blue: 13, green: 26, yellow: 39 };
-const HOME_ENTRY  = { red: 50, blue: 11, green: 24, yellow: 37 }; // dernière case avant couloir
-const SAFE_CELLS  = [0, 8, 13, 21, 26, 34, 39, 47]; // cases étoilées (safe)
+const COLORS = ['green', 'red', 'blue', 'yellow']; // ordre horaire: vert(haut-gauche), rouge(haut-droite), bleu(bas-droite), jaune(bas-gauche)
 
-// Base (avant départ) : positions visuelles fixes par couleur
-const BASE_POSITIONS = {
-  red:    [0,1,2,3],
-  blue:   [4,5,6,7],
-  green:  [8,9,10,11],
-  yellow: [12,13,14,15],
-};
+// La piste commune a 52 cases (0-51)
+// Chaque couleur démarre à sa case colorée
+// green=0, red=13, blue=26, yellow=39
+const START_IDX = { green: 0, red: 13, blue: 26, yellow: 39 };
 
-// ─── Création d'un pion ─────────────────────────────────────────────────────
+// Cases safe (étoilées) — indices absolus sur la piste
+const SAFE_ABS = [0, 8, 13, 21, 26, 34, 39, 47];
+
+// ── Pion ────────────────────────────────────────────────────────────────────
 function createPawn(color, id) {
   return {
-    id,           // 0-3
+    id,
     color,
-    state: 'base',     // 'base' | 'track' | 'home' | 'finished'
-    trackPos: -1,      // position sur la piste commune (0-51), relative à la couleur
-    homePos: -1,       // position dans le couloir final (0-5, 5 = arrivée)
+    state: 'base',      // 'base' | 'track' | 'stairs' | 'finished'
+    trackPos: -1,       // position relative sur piste (0-51), -1 si pas sur piste
+    stairsPos: -1,      // position dans l'escalier (0=entrée, 5=centre)
+    // Pour l'animation client
+    animFrom: null,
+    animTo: null,
   };
 }
 
-// ─── Création de l'état initial ─────────────────────────────────────────────
+// ── État du jeu ─────────────────────────────────────────────────────────────
 function createGameState(playerCount, withBots, botColors) {
   const pawns = {};
-  COLORS.forEach(c => {
-    pawns[c] = [0,1,2,3].map(i => createPawn(c, i));
-  });
+  COLORS.forEach(c => { pawns[c] = [0,1,2,3].map(i => createPawn(c, i)); });
   return {
     pawns,
-    players: {},       // color -> { pseudo, isBot, connected }
-    activeColors: [],  // couleurs actives dans la partie
-    turn: null,        // couleur dont c'est le tour
-    phase: 'waiting',  // 'waiting' | 'playing' | 'finished'
-    dice: null,        // valeur du dernier dé
-    diceRolled: false, // le dé a-t-il été lancé ce tour ?
-    mustMove: null,    // pion obligatoire à bouger (si un seul coup possible)
+    players: {},
+    activeColors: [],
+    turn: null,
+    phase: 'waiting',
+    dice: null,
+    diceRolled: false,
+    consecutive6: 0,
     winner: null,
-    rankings: [],      // ordre d'arrivée
-    consecutive6: 0,   // nombre de 6 consécutifs
-    moveHistory: [],
+    rankings: [],
     botColors: botColors || [],
+    moveHistory: [],
   };
 }
 
-// ─── Position absolue sur la piste (0-51) ──────────────────────────────────
-function absolutePos(color, relPos) {
-  return (START_CELLS[color] + relPos) % 52;
+// ── Position absolue sur la piste ───────────────────────────────────────────
+function absPos(color, relPos) {
+  return (START_IDX[color] + relPos) % 52;
 }
 
-// ─── Est-ce que la case est safe ? ─────────────────────────────────────────
-function isSafe(absPos) {
-  return SAFE_CELLS.includes(absPos);
-}
+// ── Case safe ? ─────────────────────────────────────────────────────────────
+function isSafe(abs) { return SAFE_ABS.includes(abs); }
 
-// ─── Calcule les mouvements possibles pour une couleur ──────────────────────
+// ── Calcule les mouvements possibles ────────────────────────────────────────
+// Règles :
+//  - Sortie de base : uniquement sur un 6
+//  - Sur un 6 : choix entre sortir un cheval OU avancer un cheval de 6 cases
+//  - Piste : 52 cases. Entrée escalier = case 50 (relative). Escalier = 6 cases (1-6)
+//  - Escalier : faut 1,2,3,4,5,6 puis encore 6 pour le centre
+//              => stairsPos 0=devant, 1-5=cases escalier, 6=centre(fini)
+//  - Trop de cases : recule d'autant (bounce back)
+//  - Occupation : si propre cheval, s'arrête juste derrière
 function getPossibleMoves(state, color, dice) {
   const pawns = state.pawns[color];
   const moves = [];
@@ -69,42 +72,57 @@ function getPossibleMoves(state, color, dice) {
   pawns.forEach(pawn => {
     if (pawn.state === 'finished') return;
 
-    if (pawn.state === 'base') {
-      // Peut sortir seulement avec un 6
-      if (dice === 6) {
-        // Vérifier si la case de départ est occupée par un pion allié
-        const startAbs = START_CELLS[color];
-        const ownOnStart = pawns.filter(p =>
-          p.state === 'track' && p.trackPos === 0
-        ).length;
-        // On peut toujours sortir (on empile ou on sort normalement)
-        moves.push({ pawnId: pawn.id, type: 'exit_base' });
-      }
+    // ── SORTIE DE BASE ──────────────────────────────────────────────────
+    if (pawn.state === 'base' && dice === 6) {
+      // Vérifier la case de départ
+      const startAbs = START_IDX[color];
+      const landing = calcTrackLanding(state, color, -1, 0, dice); // sortie = position 0
+      moves.push({ pawnId: pawn.id, type: 'exit_base', newRel: 0, landing });
       return;
     }
 
+    // ── SUR LA PISTE ────────────────────────────────────────────────────
     if (pawn.state === 'track') {
+      const STAIRS_ENTRY = 51; // position relative juste avant l'escalier
       const newRel = pawn.trackPos + dice;
-      // Entrée dans le couloir final
-      const homeEntryRel = (HOME_ENTRY[color] - START_CELLS[color] + 52) % 52;
-      if (newRel > homeEntryRel && newRel <= homeEntryRel + 6) {
-        const homePos = newRel - homeEntryRel - 1;
-        if (homePos <= 5) {
-          moves.push({ pawnId: pawn.id, type: 'enter_home', homePos });
+
+      if (newRel <= STAIRS_ENTRY) {
+        // Déplacement sur piste avec rebond
+        const landing = calcTrackLanding(state, color, pawn.trackPos, pawn.trackPos, dice);
+        moves.push({ pawnId: pawn.id, type: 'move_track', ...landing });
+      } else {
+        // Entrée dans l'escalier
+        const stairsAdvance = newRel - STAIRS_ENTRY - 1; // 0=devant, 1-5=cases
+        if (stairsAdvance <= 5) {
+          moves.push({ pawnId: pawn.id, type: 'enter_stairs', stairsPos: stairsAdvance });
+        } else if (stairsAdvance === 6) {
+          moves.push({ pawnId: pawn.id, type: 'finish' });
+        } else {
+          // Trop grand → rebond dans l'escalier
+          const bounce = stairsAdvance - (12 - stairsAdvance); // miroir
+          const bounced = Math.max(0, 12 - stairsAdvance);
+          if (bounced <= 5) moves.push({ pawnId: pawn.id, type: 'enter_stairs', stairsPos: bounced });
+          else moves.push({ pawnId: pawn.id, type: 'move_track', newRel: STAIRS_ENTRY - (stairsAdvance - 6), bounce: true });
         }
-      } else if (newRel <= homeEntryRel) {
-        // Déplacement normal sur la piste
-        moves.push({ pawnId: pawn.id, type: 'move_track', newRel });
       }
       return;
     }
 
-    if (pawn.state === 'home') {
-      const newHomePos = pawn.homePos + dice;
-      if (newHomePos === 5) {
-        moves.push({ pawnId: pawn.id, type: 'finish', homePos: 5 });
-      } else if (newHomePos < 5) {
-        moves.push({ pawnId: pawn.id, type: 'move_home', homePos: newHomePos });
+    // ── DANS L'ESCALIER ─────────────────────────────────────────────────
+    if (pawn.state === 'stairs') {
+      // stairsPos 0=devant escalier, 1-5=cases, 6=centre
+      // Pour monter: faut 1,2,3,4,5,6 → stairsPos devient 1,2,3,4,5,puis 6 pour finir
+      // Si déjà à stairsPos k, pour monter il faut lancer exactement (k+1) sauf la fin qui demande 6
+      const target = pawn.stairsPos + dice;
+      if (target === 6) {
+        moves.push({ pawnId: pawn.id, type: 'finish' });
+      } else if (target < 6) {
+        moves.push({ pawnId: pawn.id, type: 'move_stairs', stairsPos: target });
+      } else {
+        // Rebond dans l'escalier : recule d'autant de cases en trop
+        const over = target - 6;
+        const bounced = 6 - over;
+        if (bounced >= 0) moves.push({ pawnId: pawn.id, type: 'move_stairs', stairsPos: bounced, bounce: true });
       }
     }
   });
@@ -112,92 +130,108 @@ function getPossibleMoves(state, color, dice) {
   return moves;
 }
 
-// ─── Applique un mouvement ──────────────────────────────────────────────────
-function applyMove(state, color, pawnId, move) {
+// ── Calcule le landing sur la piste (rebond + occupation) ───────────────────
+function calcTrackLanding(state, color, fromRel, startRel, dice) {
+  let newRel = startRel + dice;
+  if (fromRel === -1) newRel = 0; // sortie de base
+
+  const abs = absPos(color, newRel);
+
+  // Vérifier occupation par propre pion
+  const ownOnCell = state.pawns[color].filter(p =>
+    p.state === 'track' && p.trackPos === newRel
+  ).length;
+
+  // Vérifier occupation par ennemi
+  const enemyOnCell = COLORS.filter(c => c !== color).flatMap(c =>
+    state.pawns[c].filter(p => p.state === 'track' && absPos(c, p.trackPos) === abs)
+  );
+
+  return { newRel, abs, ownBlocked: ownOnCell > 0, capture: !isSafe(abs) && enemyOnCell.length > 0 };
+}
+
+// ── Applique un mouvement ────────────────────────────────────────────────────
+function applyMove(state, color, pawnId, moveType, extra) {
   const pawn = state.pawns[color][pawnId];
   const captures = [];
+  let bounced = false;
+  let steps = []; // pour animation case par case
 
-  if (move.type === 'exit_base') {
-    pawn.state = 'track';
-    pawn.trackPos = 0;
-    // Capturer les pions adverses sur la case de départ
-    const absStart = START_CELLS[color];
+  if (moveType === 'exit_base') {
+    // Capturer ennemi sur la case de départ ?
+    const startAbs = START_IDX[color];
     COLORS.forEach(c => {
       if (c === color) return;
       state.pawns[c].forEach(p => {
-        if (p.state === 'track') {
-          const absP = absolutePos(c, p.trackPos);
-          if (absP === absStart && !isSafe(absStart)) {
-            p.state = 'base';
-            p.trackPos = -1;
-            captures.push({ color: c, pawnId: p.id });
-          }
+        if (p.state === 'track' && absPos(c, p.trackPos) === startAbs && !isSafe(startAbs)) {
+          p.state = 'base'; p.trackPos = -1;
+          captures.push({ color: c, pawnId: p.id });
         }
       });
     });
-  } else if (move.type === 'move_track') {
-    pawn.trackPos = move.newRel;
-    const absNew = absolutePos(color, move.newRel);
-    // Capture
-    if (!isSafe(absNew)) {
-      COLORS.forEach(c => {
-        if (c === color) return;
-        state.pawns[c].forEach(p => {
-          if (p.state === 'track') {
-            const absP = absolutePos(c, p.trackPos);
-            if (absP === absNew) {
-              p.state = 'base';
-              p.trackPos = -1;
+    pawn.state = 'track';
+    pawn.trackPos = 0;
+    steps = buildTrackSteps(color, -1, 0);
+
+  } else if (moveType === 'move_track') {
+    const from = pawn.trackPos;
+    let target = extra.newRel;
+    // Vérif occupation propre
+    const ownAt = state.pawns[color].filter(p =>
+      p.id !== pawnId && p.state === 'track' && p.trackPos === target
+    );
+    if (ownAt.length > 0) {
+      target = target - 1; // s'arrête juste derrière
+    } else {
+      // Capture ennemi
+      const abs = absPos(color, target);
+      if (!isSafe(abs)) {
+        COLORS.forEach(c => {
+          if (c === color) return;
+          state.pawns[c].forEach(p => {
+            if (p.state === 'track' && absPos(c, p.trackPos) === abs) {
+              p.state = 'base'; p.trackPos = -1;
               captures.push({ color: c, pawnId: p.id });
             }
-          }
+          });
         });
-      });
+      }
     }
-  } else if (move.type === 'enter_home') {
-    pawn.state = 'home';
+    steps = buildTrackSteps(color, from, target);
+    pawn.trackPos = target;
+
+  } else if (moveType === 'enter_stairs') {
+    steps = buildTrackSteps(color, pawn.trackPos, 51);
+    pawn.state = 'stairs';
     pawn.trackPos = -1;
-    pawn.homePos = move.homePos;
-  } else if (move.type === 'move_home') {
-    pawn.homePos = move.homePos;
-  } else if (move.type === 'finish') {
+    pawn.stairsPos = extra.stairsPos;
+
+  } else if (moveType === 'move_stairs') {
+    pawn.stairsPos = extra.stairsPos;
+
+  } else if (moveType === 'finish') {
     pawn.state = 'finished';
-    pawn.homePos = 5;
+    pawn.stairsPos = 6;
   }
 
-  return captures;
+  return { captures, bounced, steps };
 }
 
-// ─── Vérifie si un joueur a terminé ─────────────────────────────────────────
-function hasFinished(state, color) {
-  return state.pawns[color].every(p => p.state === 'finished');
-}
-
-// ─── Prochain joueur ─────────────────────────────────────────────────────────
-function nextTurn(state) {
-  const active = state.activeColors.filter(c => !hasFinished(state, c));
-  if (active.length <= 1) {
-    // Fin de partie
-    if (active.length === 1 && !state.rankings.includes(active[0])) {
-      state.rankings.push(active[0]);
-    }
-    state.phase = 'finished';
-    state.winner = state.rankings[0];
-    return;
+// ── Construit la liste des cases intermédiaires pour l'animation ─────────────
+function buildTrackSteps(color, fromRel, toRel) {
+  const steps = [];
+  if (fromRel === -1) { steps.push({ type: 'track', rel: 0 }); return steps; }
+  const dir = toRel >= fromRel ? 1 : -1;
+  for (let r = fromRel + dir; r !== toRel + dir; r += dir) {
+    steps.push({ type: 'track', rel: r });
   }
-  const idx = active.indexOf(state.turn);
-  state.turn = active[(idx + 1) % active.length];
-  state.diceRolled = false;
-  state.dice = null;
-  state.consecutive6 = 0;
+  return steps;
 }
 
-// ─── Lance le dé ────────────────────────────────────────────────────────────
-function rollDice() {
-  return Math.floor(Math.random() * 6) + 1;
-}
+// ── Lance le dé ─────────────────────────────────────────────────────────────
+function rollDice() { return Math.floor(Math.random() * 6) + 1; }
 
-// ─── Logique complète d'un tour : lance le dé ───────────────────────────────
+// ── Traite le lancer de dé ───────────────────────────────────────────────────
 function processDiceRoll(state, color) {
   if (state.turn !== color) return { ok: false, reason: 'Not your turn' };
   if (state.diceRolled) return { ok: false, reason: 'Already rolled' };
@@ -206,23 +240,24 @@ function processDiceRoll(state, color) {
   state.dice = dice;
   state.diceRolled = true;
 
-  // 3 six consécutifs = passer le tour
   if (dice === 6) {
     state.consecutive6 = (state.consecutive6 || 0) + 1;
     if (state.consecutive6 >= 3) {
       state.consecutive6 = 0;
       nextTurn(state);
-      return { ok: true, dice, skipped: true, reason: 'three_sixes' };
+      return { ok: true, dice, skipped: true, reason: 'three_sixes', moves: [] };
     }
+  } else {
+    state.consecutive6 = 0;
   }
 
   const moves = getPossibleMoves(state, color, dice);
 
   if (moves.length === 0) {
-    // Aucun mouvement possible → passer
+    // Aucun coup → passer le tour (sauf si 6)
     if (dice !== 6) nextTurn(state);
-    else state.diceRolled = false; // rejouer si 6 sans mouvement possible... non, on passe quand même
-    return { ok: true, dice, moves: [], autoPass: true };
+    else state.diceRolled = false;
+    return { ok: true, dice, moves: [], autoPass: dice !== 6 };
   }
 
   if (moves.length === 1) {
@@ -232,7 +267,7 @@ function processDiceRoll(state, color) {
   return { ok: true, dice, moves };
 }
 
-// ─── Applique le choix du joueur ─────────────────────────────────────────────
+// ── Traite le choix du joueur ────────────────────────────────────────────────
 function processMove(state, color, pawnId) {
   if (state.turn !== color) return { ok: false, reason: 'Not your turn' };
   if (!state.diceRolled) return { ok: false, reason: 'Roll first' };
@@ -242,79 +277,56 @@ function processMove(state, color, pawnId) {
   const move = moves.find(m => m.pawnId === pawnId);
   if (!move) return { ok: false, reason: 'Invalid move' };
 
-  const captures = applyMove(state, color, pawnId, move);
+  const result = applyMove(state, color, pawnId, move.type, move);
 
-  // Vérifier fin de partie
-  if (hasFinished(state, color)) {
+  // Victoire : 1er cheval qui atteint le centre
+  if (move.type === 'finish' && !state.winner) {
+    state.winner = color;
+    state.phase = 'finished';
     if (!state.rankings.includes(color)) state.rankings.push(color);
+    return { ok: true, move, ...result, gameOver: true };
   }
 
-  // Rejouer si 6 ou capture (règle classique)
-  const replay = dice === 6 || captures.length > 0;
-
+  // Rejouer si 6 ou capture
+  const replay = dice === 6 || result.captures.length > 0;
   if (!replay) {
     nextTurn(state);
   } else {
     state.diceRolled = false;
     state.dice = null;
-    // Garder consecutive6 si replay sur 6
-    if (dice !== 6) state.consecutive6 = 0;
+    if (result.captures.length > 0) state.consecutive6 = 0;
   }
 
-  // Vérifier fin globale
-  const remaining = state.activeColors.filter(c => !hasFinished(state, c));
-  if (remaining.length <= 1) {
-    if (remaining.length === 1 && !state.rankings.includes(remaining[0])) {
-      state.rankings.push(remaining[0]);
-    }
-    state.phase = 'finished';
-    state.winner = state.rankings[0];
-  }
-
-  return { ok: true, move, captures, replay, finished: hasFinished(state, color) };
+  return { ok: true, move, ...result, replay };
 }
 
-// ─── IA : choisit le meilleur pion à jouer ──────────────────────────────────
+// ── Passe au joueur suivant ──────────────────────────────────────────────────
+function nextTurn(state) {
+  const active = state.activeColors;
+  const idx = active.indexOf(state.turn);
+  state.turn = active[(idx + 1) % active.length];
+  state.diceRolled = false;
+  state.dice = null;
+  state.consecutive6 = 0;
+}
+
+// ── Choix IA ─────────────────────────────────────────────────────────────────
 function botChooseMove(state, color, dice) {
   const moves = getPossibleMoves(state, color, dice);
-  if (moves.length === 0) return null;
-
-  // Priorité : capturer > avancer vers la fin > sortir de base > avancer
-  // Chercher captures
-  for (const move of moves) {
-    if (move.type === 'move_track') {
-      const absNew = absolutePos(color, move.newRel);
-      const hasEnemy = COLORS.some(c => {
-        if (c === color) return false;
-        return state.pawns[c].some(p =>
-          p.state === 'track' && absolutePos(c, p.trackPos) === absNew
-        );
-      });
-      if (hasEnemy && !isSafe(absNew)) return move;
-    }
-  }
-  // Priorité finish
+  if (!moves.length) return null;
+  // Priorité: finir > escalier > capturer > avancer le plus avancé > sortir base
   const finish = moves.find(m => m.type === 'finish');
   if (finish) return finish;
-  // Priorité enter_home
-  const enterHome = moves.find(m => m.type === 'enter_home');
-  if (enterHome) return enterHome;
-  // Priorité exit_base
-  const exit = moves.find(m => m.type === 'exit_base');
-  if (exit) return exit;
-  // Avancer le pion le plus avancé
-  const trackMoves = moves.filter(m => m.type === 'move_track' || m.type === 'move_home');
-  if (trackMoves.length > 0) {
-    return trackMoves.reduce((best, m) => {
-      const bPos = best.newRel ?? best.homePos ?? 0;
-      const mPos = m.newRel ?? m.homePos ?? 0;
-      return mPos > bPos ? m : best;
-    });
-  }
+  const stairs = moves.find(m => m.type === 'enter_stairs' || m.type === 'move_stairs');
+  if (stairs) return stairs;
+  const capture = moves.find(m => m.capture);
+  if (capture) return capture;
+  const tracks = moves.filter(m => m.type === 'move_track');
+  if (tracks.length) return tracks.reduce((b, m) => (m.newRel > b.newRel ? m : b));
   return moves[0];
 }
 
-// ─── Sérialisation de l'état ─────────────────────────────────────────────────
+// ── Sérialisation ─────────────────────────────────────────────────────────────
 function serializeState(state) {
   return {
     pawns: state.pawns,
@@ -330,8 +342,12 @@ function serializeState(state) {
   };
 }
 
+function hasFinished(state, color) {
+  return state.winner === color;
+}
+
 module.exports = {
   createGameState, processDiceRoll, processMove, botChooseMove,
-  getPossibleMoves, serializeState, COLORS, START_CELLS, SAFE_CELLS,
-  absolutePos, hasFinished, nextTurn,
+  getPossibleMoves, serializeState, COLORS, START_IDX, SAFE_ABS,
+  absPos, hasFinished, nextTurn, rollDice,
 };

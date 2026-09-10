@@ -185,6 +185,7 @@ function doMove(room, color, pawnId) {
     color, pawnId,
     captures: result.captures,
     replay: result.replay,
+    steps: result.steps || [],
     state: serializeState(room.state),
   });
 
