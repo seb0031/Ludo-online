@@ -1,6 +1,6 @@
 'use strict';
 /* ═══════════════════════════════════════════════════════════════════
-   GAME.JS — Plateau fidèle + animations case par case + sons
+   GAME.JS — Plateau + animations case par case + gestion dé corrigée
    ═══════════════════════════════════════════════════════════════════ */
 const Game = (() => {
   const canvas = document.getElementById('ludo-board');
@@ -40,8 +40,7 @@ const Game = (() => {
   }
 
   // ════════════════════════════════════════════════════════════════
-  // DÉFINITION DES CASES (grille 11×11, coins = bases 6×6 virtuels)
-  // Piste commune : 52 cases, sens horaire
+  // DÉFINITION DES CASES
   // ════════════════════════════════════════════════════════════════
 
   const TRACK = [
@@ -63,13 +62,6 @@ const Game = (() => {
     [0,5],
     [0,4],
   ].slice(0, 52);
-
-  const STAIRS = {
-    green:  [[1,5],[2,5],[3,5],[4,5],[5,5],[5,5]],
-    red:    [[5,1],[5,2],[5,3],[5,4],[5,5],[5,5]],
-    blue:   [[9,5],[8,5],[7,5],[6,5],[5,5],[5,5]],
-    yellow: [[5,9],[5,8],[5,7],[5,6],[5,5],[5,5]],
-  };
 
   const STAIRS_CELLS = {
     green:  [[1,5],[2,5],[3,5],[4,5],[5,5]],
@@ -405,7 +397,9 @@ const Game = (() => {
         state = data.state;
         if (data.dice === 6) Audio.playSix();
         else Audio.playDiceRoll();
-        $('dice').classList.remove('rolling');
+
+        const diceEl = $('dice');
+        if (diceEl) diceEl.classList.remove('rolling');
 
         if (data.skipped) {
           updateUI(); render();
@@ -414,7 +408,7 @@ const Game = (() => {
         }
         if (data.autoPass) {
           updateUI(); render();
-          showToast(`${COLOR_NAMES[data.color]} ne peut pas jouer !`, 1600);
+          showToast(`${COLOR_NAMES[data.color] || data.color} ne peut pas jouer !`, 1600);
           break;
         }
         if (data.moves?.length > 0 && data.color === myColor) {
@@ -426,7 +420,6 @@ const Game = (() => {
       }
 
       case 'move_made': {
-        const prevState = state;
         state = data.state;
         const { color, pawnId, captures, steps } = data;
         animating = true;
@@ -439,7 +432,7 @@ const Game = (() => {
             function doNextCapture() {
               if (captureIdx >= captures.length) { finishMove(); return; }
               const cap = captures[captureIdx++];
-              const abs = (({ green:0, red:13, blue:26, yellow:39 })[color]);
+              const abs = START_ABS[color];
               const [c, r] = TRACK[abs];
               animateCapture(c*SZ + SZ/2, r*SZ + SZ/2, cap.color, doNextCapture);
               showToast(`💥 ${COLOR_NAMES[cap.color]} retourne à l'écurie !`, 2000);
@@ -540,15 +533,21 @@ const Game = (() => {
     canvas.addEventListener('click',    handleClick);
     canvas.addEventListener('touchend', handleClick, { passive: false });
 
-    $('dice').onclick = () => {
-      if (animating) return;
-      Audio.init();
-      if (!state || state.phase !== 'playing') return;
-      if (state.turn !== myColor || state.diceRolled) return;
-      $('dice').classList.add('rolling','disabled');
-      Audio.playDiceRoll();
-      socket.emit('roll_dice');
-    };
+    // Enregistrement sécurisé de l'évènement du dé
+    const diceBtn = $('dice');
+    if (diceBtn) {
+      diceBtn.onclick = (e) => {
+        e.preventDefault();
+        if (animating) return;
+        Audio.init();
+        if (!state || state.phase !== 'playing') return;
+        if (state.turn !== myColor || state.diceRolled) return;
+
+        diceBtn.classList.add('rolling', 'disabled');
+        Audio.playDiceRoll();
+        socket.emit('roll_dice');
+      };
+    }
 
     $('opt-anim')?.addEventListener('change', e => { window.animEnabled = e.target.checked; });
   }
