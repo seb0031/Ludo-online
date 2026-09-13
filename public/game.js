@@ -1,6 +1,6 @@
 'use strict';
 /* ═══════════════════════════════════════════════════════════════════
-   GAME.JS — Code complet (Correction de l'affichage du dé)
+   GAME.JS — Code complet corrigé (Calculs, clics et interface)
    ═══════════════════════════════════════════════════════════════════ */
 
 // ── SYSTÈME AUDIO SYNTHÉTIQUE (Web Audio API) ───────────────────────
@@ -142,10 +142,15 @@ const Game = (() => {
       const cx = b.x + b.w/2, cy = b.y + b.h/2, r = b.w/2 - s*0.3;
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
       ctx.fillStyle = PAL[color].main; ctx.fill();
-      BASE_SLOTS[color].forEach(([sc, sr]) => {
-        const px = sc*s + s/2, py = sr*s + s/2;
-        ctx.beginPath(); ctx.arc(px, py, s*0.32, 0, Math.PI*2);
-        ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fill();
+
+      // Dessiner les emplacements d'écurie uniquement si le pion s'y trouve encore
+      BASE_SLOTS[color].forEach(([sc, sr], idx) => {
+        const pawnAtBase = state.pawns?.[color]?.find(p => p.id === idx && p.state === 'base');
+        if (pawnAtBase) {
+          const px = sc*s + s/2, py = sr*s + s/2;
+          ctx.beginPath(); ctx.arc(px, py, s*0.32, 0, Math.PI*2);
+          ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fill();
+        }
       });
     });
 
@@ -284,7 +289,7 @@ const Game = (() => {
         const pos = getPawnCanvasPos(pawn, myColor);
         if (!pos) return;
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, SZ*0.42, 0, Math.PI*2);
+        ctx.arc(pos.x, pos.y, SZ*0.44, 0, Math.PI*2);
         ctx.strokeStyle = '#ffffff'; 
         ctx.lineWidth = 3;
         ctx.stroke();
@@ -395,12 +400,14 @@ const Game = (() => {
 
     const playableIds = pendingMoves.map(m => m.pawnId);
     const pawns = state.pawns[myColor] || [];
+
     for (const pawn of pawns) {
       if (!playableIds.includes(pawn.id)) continue;
       const pos = getPawnCanvasPos(pawn, myColor);
       if (!pos) continue;
-      const dist = Math.sqrt((mx-pos.x)**2 + (my-pos.y)**2);
-      if (dist <= SZ * 0.48) {
+      
+      const dist = Math.sqrt((mx - pos.x) ** 2 + (my - pos.y) ** 2);
+      if (dist <= SZ * 0.8) {
         AudioFx.playClick();
         waitingForPawn = false;
         pendingMoves   = [];
@@ -441,7 +448,7 @@ const Game = (() => {
         banner.className   = 'turn-banner my-turn';
       } else {
         const pseudo = (state.players && state.players[state.turn]?.pseudo) || state.turn;
-        banner.textContent = `⏳ Tour de ${pseudo}${isBot ? ' 🤖' : ''}`;
+        banner.textContent = state.diceRolled ? `⏳ ${pseudo} choisit un cheval…` : `⏳ Tour de ${pseudo}${isBot ? ' 🤖' : ''}`;
         banner.className   = isBot ? 'turn-banner bot-turn' : 'turn-banner';
       }
     }
@@ -462,6 +469,11 @@ const Game = (() => {
       state = data.gameState || data.state;
     }
 
+    if (socket && state && state.players) {
+      const c = Object.keys(state.players).find(col => state.players[col].id === socket.id);
+      if (c) myColor = c;
+    }
+
     switch (event) {
       case 'dice_rolled': {
         const diceVal = data.dice || (state ? state.dice : 1);
@@ -474,6 +486,9 @@ const Game = (() => {
           } else if (data.moves?.length > 0 && data.color === myColor) {
             pendingMoves   = data.moves;
             waitingForPawn = true;
+          } else {
+            waitingForPawn = false;
+            pendingMoves = [];
           }
           updateUI(); 
           render();
