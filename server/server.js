@@ -1,291 +1,301 @@
+'use strict';
+
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
-const {
-  COLORS, createGameState, processDiceRoll, processMove,
-  botChooseMove, serializeState,
-} = require('./ludoEngine');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
-
-app.use(express.static(path.join(__dirname, '..', 'public')));
-
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+const io = new Server(server, {
+  cors: { origin: '*', methods: ['GET', 'POST'] }
 });
 
-const rooms = {};
+app.use(express.static(path.join(__dirname, 'public')));
 
-function generateRoomCode() {
-  let code;
-  do {
-    code = Math.floor(1000 + Math.random() * 9000).toString();
-  } while (rooms[code]);
-  return code;
+// ── CONSTANTES DU JEU ────────────────────────────────────────────────
+const COLORS = ['green', 'red', 'blue', 'yellow'];
+const START_POSITIONS = { red: 10, blue: 20, yellow: 30, green: 40 };
+
+// Stockage des salles en mémoire
+const rooms = new Map();
+
+// ── LOGIQUE DES MOUVEMENTS ET RÈGLES ─────────────────────────────────
+
+function createInitialState(activeColors = ['green', 'red']) {
+  const pawns = {};
+  activeColors.forEach(color => {
+    pawns[color] = [
+      { id: 0, state: 'base', trackPos: -1, stairsPos: 0 },
+      { id: 1, state: 'base', trackPos: -1, stairsPos: 0 },
+      { id: 2, state: 'base', trackPos: -1, stairsPos: 0 },
+      { id: 3, state: 'base', trackPos: -1, stairsPos: 0 }
+    ];
+  });
+
+  return {
+    phase: 'playing',
+    turn: activeColors[0],
+    activeColors: activeColors,
+    dice: null,
+    diceRolled: false,
+    pawns: pawns,
+    rankings: []
+  };
 }
 
-function getRoom(code) { return rooms[code] || null; }
+function getPlayableMoves(state, color, diceValue) {
+  const moves = [];
+  const playerPawns = state.pawns[color];
+  if (!playerPawns) return moves;
 
-function startGame(room, roomCode) {
-  room.started = true;
-  const colors = COLORS.slice(0, room.playerCount);
-  room.assignedColors = colors;
-
-  const humanSockets = Object.keys(room.sockets);
-  const botColors = [];
-
-  colors.forEach((col, i) => {
-    if (i < humanSockets.length) {
-      const socketId = humanSockets[i];
-      const s = room.sockets[socketId];
-      s.data.color = col;
-      // Ajout de l'identifiant socket.id pour la synchronisation client
-      room.state.players[col] = { pseudo: s.data.pseudo, id: socketId, isBot: false };
-    } else {
-      botColors.push(col);
-      room.state.players[col] = { pseudo: `Bot ${col.toUpperCase()}`, id: null, isBot: true };
+  playerPawns.forEach(pawn => {
+    // 1. Sortie d'écurie (nécessite un 6)
+    if (pawn.state === 'base') {
+      if (diceValue === 6) {
+        moves.push({ pawnId: pawn.id, type: 'spawn' });
+      }
+    }
+    // 2. Avancée sur le parcours principal
+    else if (pawn.state === 'track') {
+      const newPos = pawn.trackPos + diceValue;
+      if (newPos < 40) {
+        moves.push({ pawnId: pawn.id, type: 'track', newPos });
+      } else if (newPos === 40) {
+        // Arrivée au pied des escaliers (marche 1)
+        moves.push({ pawnId: pawn.id, type: 'stairs_enter', step: 1 });
+      } else {
+        // Dépassement : rentre dans les escaliers si diceValue le permet
+        const step = newPos - 39;
+        if (step <= 6) {
+          moves.push({ pawnId: pawn.id, type: 'stairs', step });
+        }
+      }
+    }
+    // 3. Avancée dans les escaliers
+    else if (pawn.state === 'stairs') {
+      const currentStep = pawn.stairsPos;
+      // On doit faire exactement le chiffre de la marche suivante
+      if (diceValue === currentStep) {
+        if (currentStep === 6) {
+          moves.push({ pawnId: pawn.id, type: 'finish' });
+        } else {
+          moves.push({ pawnId: pawn.id, type: 'stairs_up', step: currentStep + 1 });
+        }
+      }
     }
   });
 
-  room.botColors = botColors;
-  room.state.activeColors = colors;
-  room.state.turn = colors[0];
-  room.state.phase = 'playing';
-
-  io.to(roomCode).emit('game_start', {
-    gameState: serializeState(room.state),
-    colors,
-    players: room.state.players,
-  });
-
-  checkBotTurn(room, roomCode);
+  return moves;
 }
 
-function checkBotTurn(room, roomCode) {
-  if (room.state.phase !== 'playing') return;
-  const turn = room.state.turn;
-  if (!room.botColors.includes(turn)) return;
+function applyPawnMove(state, color, pawnId) {
+  const pawn = state.pawns[color].find(p => p.id === pawnId);
+  const diceValue = state.dice;
+  const steps = [];
+  const captures = [];
 
-  setTimeout(() => {
-    if (room.state.turn !== turn || room.state.phase !== 'playing') return;
+  if (!pawn || !diceValue) return { steps, captures };
 
-    const rollRes = processDiceRoll(room.state, turn);
-    if (!rollRes.ok) return;
+  if (pawn.state === 'base' && diceValue === 6) {
+    pawn.state = 'track';
+    pawn.trackPos = 0;
+    steps.push({ type: 'track', rel: 0 });
+  } 
+  else if (pawn.state === 'track') {
+    const start = pawn.trackPos;
+    const target = start + diceValue;
 
-    io.to(roomCode).emit('dice_rolled', {
-      color: turn,
-      dice: rollRes.dice,
-      moves: rollRes.moves || [],
-      skipped: rollRes.skipped || false,
-      autoPass: rollRes.autoPass || false,
-      gameState: serializeState(room.state)
+    for (let pos = start + 1; pos <= Math.min(target, 39); pos++) {
+      steps.push({ type: 'track', rel: pos });
+    }
+
+    if (target <= 39) {
+      pawn.trackPos = target;
+    } else {
+      pawn.state = 'stairs';
+      pawn.stairsPos = 1;
+      steps.push({ type: 'stairs', pos: 1 });
+    }
+  } 
+  else if (pawn.state === 'stairs') {
+    if (diceValue === pawn.stairsPos) {
+      if (pawn.stairsPos === 6) {
+        pawn.state = 'finished';
+        steps.push({ type: 'finished' });
+      } else {
+        pawn.stairsPos += 1;
+        steps.push({ type: 'stairs', pos: pawn.stairsPos });
+      }
+    }
+  }
+
+  // Vérification de la capture d'un adversaire
+  if (pawn.state === 'track') {
+    const myAbsPos = (START_POSITIONS[color] + pawn.trackPos) % 52;
+
+    Object.entries(state.pawns).forEach(([otherColor, pawns]) => {
+      if (otherColor === color) return;
+      pawns.forEach(otherPawn => {
+        if (otherPawn.state === 'track') {
+          const otherAbsPos = (START_POSITIONS[otherColor] + otherPawn.trackPos) % 52;
+          if (myAbsPos === otherAbsPos) {
+            // Capture ! Le pion ennemi retourne à la base
+            otherPawn.state = 'base';
+            otherPawn.trackPos = -1;
+            captures.push({ color: otherColor, pawnId: otherPawn.id });
+          }
+        }
+      });
+    });
+  }
+
+  return { steps, captures };
+}
+
+function nextTurn(state) {
+  const currentIndex = state.activeColors.indexOf(state.turn);
+  const nextIndex = (currentIndex + 1) % state.activeColors.length;
+  state.turn = state.activeColors[nextIndex];
+  state.dice = null;
+  state.diceRolled = false;
+}
+
+// ── SOCKET.IO HANDLERS ───────────────────────────────────────────────
+
+io.on('connection', (socket) => {
+  let currentRoom = null;
+  let playerColor = null;
+
+  socket.on('create_room', ({ pseudo, activeColors }) => {
+    const roomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const colors = activeColors || ['green', 'red'];
+    
+    const room = {
+      code: roomCode,
+      players: {
+        [colors[0]]: { id: socket.id, pseudo: pseudo || 'Joueur 1', isBot: false }
+      },
+      activeColors: colors,
+      state: createInitialState(colors)
+    };
+
+    // Assigner les bots si besoin
+    colors.slice(1).forEach((col, idx) => {
+      room.players[col] = { id: `bot_${idx}`, pseudo: `Bot ${col}`, isBot: true };
     });
 
-    if (rollRes.skipped || rollRes.autoPass) {
-      io.to(roomCode).emit('turn_changed', { turn: room.state.turn, gameState: serializeState(room.state) });
-      checkBotTurn(room, roomCode);
+    rooms.set(roomCode, room);
+    currentRoom = roomCode;
+    playerColor = colors[0];
+
+    socket.join(roomCode);
+    socket.emit('room_created', { roomCode, color: playerColor, gameState: room.state });
+  });
+
+  socket.on('join_room', ({ roomCode, pseudo }) => {
+    const room = rooms.get(roomCode?.toUpperCase());
+    if (!room) {
+      socket.emit('error_msg', 'Partie introuvable.');
       return;
     }
 
-    setTimeout(() => {
-      const chosen = botChooseMove(room.state, turn, rollRes.dice);
-      if (!chosen) return;
-
-      const moveRes = processMove(room.state, turn, chosen.pawnId);
-      if (moveRes.ok) {
-        io.to(roomCode).emit('pawn_moved', {
-          color: turn,
-          pawnId: chosen.pawnId,
-          steps: moveRes.steps || moveRes.move,
-          captures: moveRes.captures,
-          replay: moveRes.replay || false,
-          gameState: serializeState(room.state),
-        });
-
-        if (moveRes.gameOver) {
-          io.to(roomCode).emit('game_over', { winner: turn, rankings: room.state.rankings });
-        } else {
-          checkBotTurn(room, roomCode);
-        }
-      }
-    }, 800);
-  }, 1000);
-}
-
-io.on('connection', (socket) => {
-
-  socket.on('create_room', ({ pseudo, playerCount, withBots }) => {
-    const code = generateRoomCode();
-    const color = 'red';
-    const token = Math.random().toString(36).substring(2);
-
-    socket.data = { pseudo, roomCode: code, color, token };
-
-    rooms[code] = {
-      code,
-      playerCount: parseInt(playerCount) || 4,
-      withBots: !!withBots,
-      started: false,
-      sockets: { [socket.id]: socket },
-      botColors: [],
-      assignedColors: [],
-      state: createGameState(parseInt(playerCount) || 4, !!withBots),
-      rematchVotes: new Set(),
-    };
-
-    socket.join(code);
-
-    socket.emit('room_created', {
-      code,
-      color,
-      token,
-      pseudo,
-      withBots: !!withBots,
-    });
-
-    if (withBots) {
-      startGame(rooms[code], code);
+    const availableColor = room.activeColors.find(c => room.players[c]?.isBot);
+    if (!availableColor) {
+      socket.emit('error_msg', 'La partie est déjà complète.');
+      return;
     }
-  });
 
-  socket.on('join_room', ({ code, pseudo }) => {
-    const room = getRoom(code);
-    if (!room) return socket.emit('error', { message: 'Salon introuvable.' });
-    if (room.started) return socket.emit('error', { message: 'Partie déjà en cours.' });
-    if (Object.keys(room.sockets).length >= room.playerCount) return socket.emit('error', { message: 'Salon complet.' });
+    room.players[availableColor] = { id: socket.id, pseudo: pseudo || 'Joueur 2', isBot: false };
+    currentRoom = room.code;
+    playerColor = availableColor;
 
-    const colorOrder = ['red', 'blue', 'green', 'yellow'];
-    const usedColors = Object.values(room.sockets).map(s => s.data.color);
-    const color = colorOrder.find(c => !usedColors.includes(c)) || 'blue';
-    const token = Math.random().toString(36).substring(2);
-
-    socket.data = { pseudo, roomCode: code, color, token };
-    room.sockets[socket.id] = socket;
-    socket.join(code);
-
-    socket.emit('room_joined', { code, color, token, pseudo });
-
-    const playersData = {};
-    Object.values(room.sockets).forEach(s => {
-      playersData[s.data.color] = { pseudo: s.data.pseudo, id: s.id, isBot: false };
-    });
-
-    io.to(code).emit('player_joined', {
-      color,
-      pseudo,
-      players: playersData,
-    });
-
-    if (Object.keys(room.sockets).length === room.playerCount) {
-      startGame(room, code);
-    }
+    socket.join(room.code);
+    io.to(room.code).emit('game_started', { gameState: room.state, players: room.players });
   });
 
   socket.on('roll_dice', () => {
-    const room = getRoom(socket.data.roomCode);
-    if (!room || !room.started) return;
-    const color = socket.data.color;
+    if (!currentRoom) return;
+    const room = rooms.get(currentRoom);
+    if (!room) return;
 
-    const res = processDiceRoll(room.state, color);
-    if (!res.ok) return socket.emit('error', { message: res.reason });
+    const state = room.state;
+    if (state.turn !== playerColor || state.diceRolled) return;
 
-    // Transmission explicite des champs réclamés par le client
-    io.to(room.code).emit('dice_rolled', {
-      color,
-      dice: res.dice,
-      moves: res.moves || [],
-      skipped: res.skipped || false,
-      autoPass: res.autoPass || false,
-      gameState: serializeState(room.state)
-    });
+    const diceValue = Math.floor(Math.random() * 6) + 1;
+    state.dice = diceValue;
+    state.diceRolled = true;
 
-    if (res.skipped || res.autoPass) {
-      io.to(room.code).emit('turn_changed', { turn: room.state.turn, gameState: serializeState(room.state) });
-      checkBotTurn(room, room.code);
-    } else if (res.autoMove) {
+    const moves = getPlayableMoves(state, playerColor, diceValue);
+
+    // Si aucun coup possible, on passe le tour automatiquement après un délai
+    if (moves.length === 0) {
+      io.to(currentRoom).emit('dice_rolled', {
+        color: playerColor,
+        dice: diceValue,
+        gameState: state,
+        moves: [],
+        skipped: true
+      });
+
       setTimeout(() => {
-        const moveRes = processMove(room.state, color, res.autoMove.pawnId);
-        if (moveRes.ok) {
-          io.to(room.code).emit('pawn_moved', {
-            color,
-            pawnId: res.autoMove.pawnId,
-            steps: moveRes.steps || moveRes.move,
-            captures: moveRes.captures,
-            replay: moveRes.replay || false,
-            gameState: serializeState(room.state),
-          });
-          if (moveRes.gameOver) {
-            io.to(room.code).emit('game_over', { winner: color, rankings: room.state.rankings });
-          } else {
-            checkBotTurn(room, room.code);
-          }
+        if (diceValue !== 6) {
+          nextTurn(state);
+        } else {
+          state.diceRolled = false; // Rejoue car il a fait un 6
         }
-      }, 500);
+        io.to(currentRoom).emit('turn_changed', { gameState: state });
+      }, 1200);
+    } else {
+      io.to(currentRoom).emit('dice_rolled', {
+        color: playerColor,
+        dice: diceValue,
+        gameState: state,
+        moves: moves,
+        skipped: false
+      });
     }
   });
 
   socket.on('move_pawn', ({ pawnId }) => {
-    const room = getRoom(socket.data.roomCode);
-    if (!room || !room.started) return;
-    const color = socket.data.color;
+    if (!currentRoom) return;
+    const room = rooms.get(currentRoom);
+    if (!room) return;
 
-    const res = processMove(room.state, color, pawnId);
-    if (!res.ok) return socket.emit('error', { message: res.reason });
+    const state = room.state;
+    if (state.turn !== playerColor || !state.diceRolled) return;
 
-    io.to(room.code).emit('pawn_moved', {
-      color,
-      pawnId,
-      steps: res.steps || res.move,
-      captures: res.captures,
-      replay: res.replay || false,
-      gameState: serializeState(room.state),
+    const lastDice = state.dice;
+    const { steps, captures } = applyPawnMove(state, playerColor, pawnId);
+
+    io.to(currentRoom).emit('pawn_moved', {
+      color: playerColor,
+      pawnId: pawnId,
+      steps: steps,
+      captures: captures,
+      gameState: state
     });
 
-    if (res.gameOver) {
-      io.to(room.code).emit('game_over', { winner: color, rankings: room.state.rankings });
+    // Un 6 permet de rejouer
+    if (lastDice === 6) {
+      state.diceRolled = false;
+      state.dice = null;
+      io.to(currentRoom).emit('turn_changed', { gameState: state });
     } else {
-      checkBotTurn(room, room.code);
-    }
-  });
-
-  socket.on('request_rematch', () => {
-    const room = getRoom(socket.data.roomCode);
-    if (!room) return;
-    if (!room.rematchVotes) room.rematchVotes = new Set();
-    room.rematchVotes.add(socket.data.color);
-
-    const humanColors = room.assignedColors.filter(c => !room.botColors.includes(c));
-    if (room.rematchVotes.size >= humanColors.length) {
-      const oldPlayers = room.state.players;
-
-      room.state = createGameState(room.playerCount, room.withBots, room.botColors);
-      room.state.activeColors = room.assignedColors;
-      room.state.players = oldPlayers;
-
-      room.started = false;
-      room.rematchVotes = new Set();
-      startGame(room, room.code);
-    } else {
-      socket.to(room.code).emit('rematch_requested', { by: socket.data.color });
+      nextTurn(state);
+      io.to(currentRoom).emit('turn_changed', { gameState: state });
     }
   });
 
   socket.on('disconnect', () => {
-    const room = getRoom(socket.data.roomCode);
-    if (!room) return;
-    delete room.sockets[socket.id];
-    if (Object.keys(room.sockets).length === 0) {
-      delete rooms[room.code];
-    } else if (room.started) {
-      io.to(room.code).emit('opponent_disconnected', { color: socket.data.color });
+    if (currentRoom) {
+      const room = rooms.get(currentRoom);
+      if (room && room.players[playerColor]) {
+        room.players[playerColor].isBot = true; // Remplacé par un bot
+      }
     }
   });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Serveur Ludo en écoute sur http://localhost:${PORT}`);
-});
+server.listen(PORT, () => console.log(`Serveur démarré sur http://localhost:${PORT}`));
