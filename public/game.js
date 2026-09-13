@@ -1,9 +1,5 @@
 'use strict';
-/* ═══════════════════════════════════════════════════════════════════
-   GAME.JS — Code complet corrigé (Calculs, clics et interface)
-   ═══════════════════════════════════════════════════════════════════ */
 
-// ── SYSTÈME AUDIO SYNTHÉTIQUE (Web Audio API) ───────────────────────
 const AudioFx = (() => {
   let ctx = null;
 
@@ -12,9 +8,7 @@ const AudioFx = (() => {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (AudioCtx) ctx = new AudioCtx();
     }
-    if (ctx && ctx.state === 'suspended') {
-      ctx.resume();
-    }
+    if (ctx && ctx.state === 'suspended') ctx.resume();
   }
 
   function playTone(freq, type, duration, vol = 0.1) {
@@ -43,10 +37,7 @@ const AudioFx = (() => {
       playTone(523.25, 'sine', 0.1, 0.15);
       setTimeout(() => playTone(659.25, 'sine', 0.15, 0.15), 100);
     },
-    playCapture: () => {
-      init();
-      playTone(150, 'sawtooth', 0.2, 0.2);
-    },
+    playCapture: () => { init(); playTone(150, 'sawtooth', 0.2, 0.2); },
     playVictory: () => {
       init();
       [261.63, 329.63, 392.00, 523.25].forEach((f, i) => {
@@ -56,7 +47,6 @@ const AudioFx = (() => {
   };
 })();
 
-// ── MOTEUR VISUEL ET RÉSEAU DU JEU ───────────────────────────────────
 const Game = (() => {
   const canvas = document.getElementById('ludo-board');
   const ctx    = canvas.getContext('2d');
@@ -85,9 +75,8 @@ const Game = (() => {
     const botBarH = parseInt(getComputedStyle(document.querySelector('.game-bottom-bar'))?.height) || 80;
     const available = Math.min(vw - 8, vh - topBarH - botBarH - 50);
     SZ = Math.max(20, Math.floor(available / N));
-    const size = SZ * N;
-    canvas.width  = size;
-    canvas.height = size;
+    canvas.width  = SZ * N;
+    canvas.height = SZ * N;
     if (state) render();
   }
 
@@ -143,7 +132,6 @@ const Game = (() => {
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
       ctx.fillStyle = PAL[color].main; ctx.fill();
 
-      // Dessiner les emplacements d'écurie uniquement si le pion s'y trouve encore
       BASE_SLOTS[color].forEach(([sc, sr], idx) => {
         const pawnAtBase = state.pawns?.[color]?.find(p => p.id === idx && p.state === 'base');
         if (pawnAtBase) {
@@ -221,9 +209,7 @@ const Game = (() => {
       const cell = TRACK[abs];
       if (!cell) return null;
 
-      const stack = getPawnsOnAbsCell(abs);
-      const off = getCenteringOffset(stack, color, pawn.id);
-      return { x: cell[0]*s + s/2 + off.x, y: cell[1]*s + s/2 + off.y };
+      return { x: cell[0]*s + s/2, y: cell[1]*s + s/2 };
     }
 
     if (pawn.state === 'stairs') {
@@ -234,36 +220,10 @@ const Game = (() => {
     }
 
     if (pawn.state === 'finished') {
-      const offsets = { green:[-s*0.22,-s*0.22], red:[s*0.22,-s*0.22], blue:[s*0.22,s*0.22], yellow:[-s*0.22,s*0.22] };
-      const [ox, oy] = offsets[color] || [0,0];
-      return { x: 5*s+s/2+ox, y: 5*s+s/2+oy };
+      return { x: 5*s+s/2, y: 5*s+s/2 };
     }
 
     return null;
-  }
-
-  function getPawnsOnAbsCell(abs) {
-    if (!state || !state.pawns) return [];
-    const list = [];
-    Object.entries(state.pawns).forEach(([col, pawns]) => {
-      if (Array.isArray(pawns)) {
-        pawns.forEach(p => {
-          if (p && p.state === 'track') {
-            const pAbs = (START_ABS[col] + p.trackPos) % 52;
-            if (pAbs === abs) list.push({ color: col, id: p.id });
-          }
-        });
-      }
-    });
-    return list;
-  }
-
-  function getCenteringOffset(stack, color, pawnId) {
-    if (stack.length <= 1) return { x: 0, y: 0 };
-    const index = stack.findIndex(p => p.color === color && p.id === pawnId);
-    const d = SZ * 0.15;
-    const offsets = [{x: -d, y: -d}, {x: d, y: d}, {x: -d, y: d}, {x: d, y: -d}];
-    return offsets[index % 4] || {x:0, y:0};
   }
 
   function drawPawns(overridePawn) {
@@ -289,7 +249,7 @@ const Game = (() => {
         const pos = getPawnCanvasPos(pawn, myColor);
         if (!pos) return;
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, SZ*0.44, 0, Math.PI*2);
+        ctx.arc(pos.x, pos.y, SZ*0.48, 0, Math.PI*2);
         ctx.strokeStyle = '#ffffff'; 
         ctx.lineWidth = 3;
         ctx.stroke();
@@ -341,7 +301,7 @@ const Game = (() => {
       const startPos = getPawnCanvasPos(pawn, color) || targetPos;
       AudioFx.playStep();
 
-      const duration = Math.min(180, 500 / steps.length);
+      const duration = 150;
       const start = performance.now();
       const override = { color, id: pawnId, x: startPos.x, y: startPos.y };
 
@@ -375,20 +335,18 @@ const Game = (() => {
     AudioFx.playDiceRoll();
 
     let rollCount = 0;
-    const maxRolls = 10;
     const interval = setInterval(() => {
       rollCount++;
-      const tempVal = Math.floor(Math.random() * 6) + 1;
-      faceEl.textContent = DICE_SYMBOLS[tempVal];
+      if (faceEl) faceEl.textContent = DICE_SYMBOLS[Math.floor(Math.random() * 6) + 1];
 
-      if (rollCount >= maxRolls) {
+      if (rollCount >= 6) {
         clearInterval(interval);
         diceEl.classList.remove('rolling');
-        faceEl.textContent = DICE_SYMBOLS[finalDiceValue] || String(finalDiceValue);
+        if (faceEl) faceEl.textContent = DICE_SYMBOLS[finalDiceValue] || String(finalDiceValue);
         isDiceRolling = false;
         if (onComplete) onComplete();
       }
-    }, 50);
+    }, 60);
   }
 
   function handleClick(e) {
@@ -407,7 +365,7 @@ const Game = (() => {
       if (!pos) continue;
       
       const dist = Math.sqrt((mx - pos.x) ** 2 + (my - pos.y) ** 2);
-      if (dist <= SZ * 0.8) {
+      if (dist <= SZ * 1.2) {
         AudioFx.playClick();
         waitingForPawn = false;
         pendingMoves   = [];
@@ -477,20 +435,41 @@ const Game = (() => {
     switch (event) {
       case 'dice_rolled': {
         const diceVal = data.dice || (state ? state.dice : 1);
+
+        const safetyTimeout = setTimeout(() => {
+          isDiceRolling = false;
+          updateUI();
+        }, 1000);
+
         triggerDiceRollAnimation(diceVal, () => {
+          clearTimeout(safetyTimeout);
+          isDiceRolling = false;
+
           if (diceVal === 6) AudioFx.playSix();
 
           if (data.skipped || data.autoPass) {
             waitingForPawn = false;
             pendingMoves = [];
-          } else if (data.moves?.length > 0 && data.color === myColor) {
+          } else if (data.moves && data.moves.length > 0 && data.color === myColor) {
             pendingMoves   = data.moves;
             waitingForPawn = true;
+
+            if (data.moves.length === 1) {
+              setTimeout(() => {
+                if (waitingForPawn) {
+                  waitingForPawn = false;
+                  const pawnToMove = pendingMoves[0].pawnId;
+                  pendingMoves = [];
+                  socket.emit('move_pawn', { pawnId: pawnToMove });
+                }
+              }, 300);
+            }
           } else {
             waitingForPawn = false;
             pendingMoves = [];
           }
-          updateUI(); 
+
+          updateUI();
           render();
         });
         break;
@@ -503,9 +482,7 @@ const Game = (() => {
         pendingMoves   = [];
 
         animatePawnSteps(color, pawnId, steps || [], () => {
-          if (captures && captures.length > 0) {
-            AudioFx.playCapture();
-          }
+          if (captures && captures.length > 0) AudioFx.playCapture();
           animating = false;
           render();
           updateUI();
