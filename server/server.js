@@ -11,7 +11,13 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
-app.use(express.static(path.join(__dirname, 'public')));
+// 1. Accès au dossier public situé un dossier plus haut (..)
+app.use(express.static(path.join(__dirname, '..', 'public')));
+
+// 2. Redirection de la racine sur index.html (ou indexe.html selon le nom exact de votre fichier)
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+});
 
 const rooms = {};
 
