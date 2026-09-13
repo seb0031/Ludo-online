@@ -24,10 +24,11 @@ const Game = (() => {
   const N  = 11;
 
   function resize() {
+    if (!canvas) return;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const topBarH = parseInt(getComputedStyle(document.querySelector('.game-top-bar')).height) || 52;
-    const botBarH = parseInt(getComputedStyle(document.querySelector('.game-bottom-bar')).height) || 80;
+    const topBarH = parseInt(getComputedStyle(document.querySelector('.game-top-bar'))?.height) || 52;
+    const botBarH = parseInt(getComputedStyle(document.querySelector('.game-bottom-bar'))?.height) || 80;
     const bannerH = 36;
     const available = Math.min(vw - 8, vh - topBarH - botBarH - bannerH - 20);
     SZ = Math.max(20, Math.floor(available / N));
@@ -71,7 +72,6 @@ const Game = (() => {
     yellow: [[1,8],[2,8],[1,9],[2,9]],
   };
 
-  // Nouveaux indices de départ selon tes consignes
   const START_ABS = { red:10, blue:20, yellow:30, green:40 };
 
   function render() {
@@ -111,24 +111,20 @@ const Game = (() => {
     TRACK.forEach(([c, r], idx) => {
       const x = c*s, y = r*s;
       
-      // Toutes les cases du parcours sont blanches
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(x, y, s, s);
       ctx.strokeStyle = '#aaa'; ctx.lineWidth = 0.5;
       ctx.strokeRect(x, y, s, s);
 
-      // Vérification si la case est une case de départ
       const startColorEntry = Object.entries(START_ABS).find(([_, pos]) => pos === idx);
 
       if (startColorEntry) {
         const colorKey = startColorEntry[0];
-        // Étoile de la couleur correspondante
         ctx.fillStyle = PAL[colorKey].main;
         ctx.font = `${s*0.65}px serif`;
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText('★', x+s/2, y+s/2);
       } else {
-        // Numéro simple sur fond blanc pour toutes les autres cases
         ctx.fillStyle = 'rgba(0,0,0,0.35)';
         ctx.font = `bold ${Math.max(9, s*0.25)}px Nunito, sans-serif`;
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -235,7 +231,7 @@ const Game = (() => {
   }
 
   function drawPawns(overridePawn) {
-    if (!state) return;
+    if (!state || !state.pawns) return;
     Object.entries(state.pawns).forEach(([color, pawns]) => {
       pawns.forEach(pawn => {
         if (overridePawn && overridePawn.color === color && overridePawn.id === pawn.id) return;
@@ -268,8 +264,8 @@ const Game = (() => {
     ctx.beginPath(); ctx.arc(x+1, y+1.5, r, 0, Math.PI*2);
     ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fill();
     const grad = ctx.createRadialGradient(x-r*0.3, y-r*0.3, 1, x, y, r);
-    grad.addColorStop(0, PAL[color].light);
-    grad.addColorStop(1, PAL[color].dark);
+    grad.addColorStop(0, PAL[color]?.light || '#fff');
+    grad.addColorStop(1, PAL[color]?.dark || '#000');
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2);
     ctx.fillStyle = grad; ctx.fill();
     ctx.strokeStyle = isFinished ? '#ffd700' : 'rgba(255,255,255,0.9)';
@@ -301,7 +297,7 @@ const Game = (() => {
 
       const pawn = state.pawns[color][pawnId];
       const startPos = getPawnCanvasPos(pawn, color) || targetPos;
-      Audio.playStep();
+      if (typeof Audio !== 'undefined' && Audio.playStep) Audio.playStep();
 
       const duration = Math.min(180, 600 / steps.length);
       const start = performance.now();
@@ -324,7 +320,7 @@ const Game = (() => {
   }
 
   function animateCapture(x, y, color, callback) {
-    Audio.playCapture();
+    if (typeof Audio !== 'undefined' && Audio.playCapture) Audio.playCapture();
     let frame = 0;
     const totalFrames = 18;
     function bounce() {
@@ -358,7 +354,7 @@ const Game = (() => {
 
     isDiceRolling = true;
     diceEl.classList.add('rolling');
-    Audio.playDiceRoll();
+    if (typeof Audio !== 'undefined' && Audio.playDiceRoll) Audio.playDiceRoll();
 
     let rollCount = 0;
     const maxRolls = 12;
@@ -397,7 +393,7 @@ const Game = (() => {
         waitingForPawn = false;
         pendingMoves   = [];
         socket.emit('move_pawn', { pawnId: pawn.id });
-        Audio.playClick();
+        if (typeof Audio !== 'undefined' && Audio.playClick) Audio.playClick();
         render();
         return;
       }
@@ -409,41 +405,47 @@ const Game = (() => {
     ['green','red','blue','yellow'].forEach(c => {
       const chip = $(`chip-${c}`);
       if (!chip) return;
-      const p = state.players[c];
-      if (!p || !state.activeColors.includes(c)) { chip.style.display = 'none'; return; }
+      const p = state.players ? state.players[c] : null;
+      if (!p || (state.activeColors && !state.activeColors.includes(c))) { chip.style.display = 'none'; return; }
       chip.style.display = 'flex';
-      $(`name-${c}`).textContent = p.pseudo + (p.isBot ? ' 🤖' : '');
+      const nameEl = $(`name-${c}`);
+      if (nameEl) nameEl.textContent = (p.pseudo || p.nickname || c) + (p.isBot ? ' 🤖' : '');
       chip.classList.toggle('active-turn', state.turn === c);
     });
 
     const banner = $('turn-banner');
-    const isMyTurn = state.turn === myColor;
-    const isBot = state.players[state.turn]?.isBot;
-    if (isMyTurn) {
-      banner.textContent = state.diceRolled ? '👆 Choisissez un cheval' : '🎲 À vous de lancer !';
-      banner.className   = 'turn-banner my-turn';
-    } else {
-      const pseudo = state.players[state.turn]?.pseudo || '?';
-      banner.textContent = `⏳ Tour de ${pseudo}${isBot ? ' 🤖' : ''}…`;
-      banner.className   = isBot ? 'turn-banner bot-turn' : 'turn-banner';
+    if (banner) {
+      const isMyTurn = state.turn === myColor;
+      const isBot = state.players && state.players[state.turn]?.isBot;
+      if (isMyTurn) {
+        banner.textContent = state.diceRolled ? '👆 Choisissez un cheval' : '🎲 À vous de lancer !';
+        banner.className   = 'turn-banner my-turn';
+      } else {
+        const pseudo = (state.players && state.players[state.turn]?.pseudo) || state.turn || '?';
+        banner.textContent = `⏳ Tour de ${pseudo}${isBot ? ' 🤖' : ''}…`;
+        banner.className   = isBot ? 'turn-banner bot-turn' : 'turn-banner';
+      }
     }
 
     const diceEl = $('dice');
     const faceEl = $('dice-face');
     if (diceEl && faceEl && !isDiceRolling) {
       faceEl.textContent = state.dice ? DICE_SYMBOLS[state.dice] : '🎲';
-      const canRoll = isMyTurn && !state.diceRolled && state.phase === 'playing' && !animating;
+      const canRoll = (state.turn === myColor) && !state.diceRolled && state.phase === 'playing' && !animating;
       diceEl.classList.toggle('disabled', !canRoll);
     }
   }
 
   function onEvent(event, data) {
+    if (data && (data.gameState || data.state)) {
+      state = data.gameState || data.state;
+    }
+
     switch (event) {
 
       case 'dice_rolled': {
-        state = data.state;
         triggerDiceRollAnimation(data.dice, () => {
-          if (data.dice === 6) Audio.playSix();
+          if (data.dice === 6 && typeof Audio !== 'undefined' && Audio.playSix) Audio.playSix();
 
           if (data.skipped) {
             updateUI(); render();
@@ -464,8 +466,8 @@ const Game = (() => {
         break;
       }
 
-      case 'move_made': {
-        state = data.state;
+      case 'move_made':
+      case 'pawn_moved': {
         const { color, pawnId, captures, steps } = data;
         animating = true;
         waitingForPawn = false;
@@ -497,34 +499,40 @@ const Game = (() => {
         break;
       }
 
+      case 'turn_changed': {
+        updateUI(); render();
+        break;
+      }
+
       case 'game_over': {
-        state = data.state;
         animating = false;
         render(); updateUI();
-        Audio.playVictory();
+        if (typeof Audio !== 'undefined' && Audio.playVictory) Audio.playVictory();
         setTimeout(() => showGameOver(data), 800);
         break;
       }
 
       case 'opponent_disconnected':
-        $('modal-disconnect').style.display = 'flex'; break;
+        if ($('modal-disconnect')) $('modal-disconnect').style.display = 'flex'; break;
       case 'opponent_reconnected':
-        $('modal-disconnect').style.display = 'none'; break;
+        if ($('modal-disconnect')) $('modal-disconnect').style.display = 'none'; break;
       case 'rematch_requested':
-        $('rematch-status').textContent = 'Un joueur veut rejouer !'; break;
+        if ($('rematch-status')) $('rematch-status').textContent = 'Un joueur veut rejouer !'; break;
 
       case 'game_start':
+      case 'game_started':
       case 'rematch_start':
-        $('modal-gameover').style.display = 'none';
-        $('rematch-status').textContent   = '';
-        $('btn-rematch').textContent       = '🔄 Rejouer';
-        $('btn-rematch').disabled          = false;
-        state          = data.state;
+        if ($('modal-gameover')) $('modal-gameover').style.display = 'none';
+        if ($('rematch-status')) $('rematch-status').textContent   = '';
+        if ($('btn-rematch')) {
+          $('btn-rematch').textContent       = '🔄 Rejouer';
+          $('btn-rematch').disabled          = false;
+        }
         animating      = false;
         waitingForPawn = false;
         pendingMoves   = [];
         updateUI(); render();
-        Audio.playStart();
+        if (typeof Audio !== 'undefined' && Audio.playStart) Audio.playStart();
         break;
     }
   }
@@ -550,22 +558,26 @@ const Game = (() => {
   function showGameOver(data) {
     const medals = ['🥇','🥈','🥉','4️⃣'];
     const dotColor = { green:'#3cb043', red:'#e02020', blue:'#2060e0', yellow:'#e0b800' };
-    $('gameover-trophies').textContent = data.winner === myColor ? '🏆🎉🏆' : '🎲';
-    $('gameover-title').textContent    = data.winner === myColor ? 'VICTOIRE !' :
-      `${state?.players[data.winner]?.pseudo || '?'} gagne !`;
-    $('gameover-rankings').innerHTML = (data.rankings || []).map((c, i) =>
-      `<div class="ranking-row">
-        <span class="ranking-pos">${medals[i]||i+1}</span>
-        <span class="ranking-color" style="background:${dotColor[c]}"></span>
-        <span class="ranking-name">${state?.players[c]?.pseudo || c}</span>
-      </div>`
-    ).join('');
-    $('modal-gameover').style.display = 'flex';
+    if ($('gameover-trophies')) $('gameover-trophies').textContent = data.winner === myColor ? '🏆🎉🏆' : '🎲';
+    if ($('gameover-title')) {
+      $('gameover-title').textContent = data.winner === myColor ? 'VICTOIRE !' :
+        `${state?.players[data.winner]?.pseudo || '?'} gagne !`;
+    }
+    if ($('gameover-rankings')) {
+      $('gameover-rankings').innerHTML = (data.rankings || []).map((c, i) =>
+        `<div class="ranking-row">
+          <span class="ranking-pos">${medals[i]||i+1}</span>
+          <span class="ranking-color" style="background:${dotColor[c]}"></span>
+          <span class="ranking-name">${state?.players[c]?.pseudo || c}</span>
+        </div>`
+      ).join('');
+    }
+    if ($('modal-gameover')) $('modal-gameover').style.display = 'flex';
   }
 
   function init(sock, payload, isReconnect) {
     socket  = sock;
-    state   = payload.state;
+    state   = payload.gameState || payload.state;
     myColor = isReconnect ? payload.color : (localStorage.getItem('ludo_color') || 'green');
     animating = false; waitingForPawn = false; pendingMoves = []; isDiceRolling = false;
     window.animEnabled = $('opt-anim')?.checked !== false;
@@ -582,7 +594,7 @@ const Game = (() => {
       diceBtn.onclick = (e) => {
         e.preventDefault();
         if (animating || isDiceRolling) return;
-        Audio.init();
+        if (typeof Audio !== 'undefined' && Audio.init) Audio.init();
         if (!state || state.phase !== 'playing') return;
         if (state.turn !== myColor || state.diceRolled) return;
 
