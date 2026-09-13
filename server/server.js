@@ -11,10 +11,10 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
-// 1. Accès au dossier public situé un dossier plus haut (..)
+// 1. Accès au dossier public (situé un dossier au-dessus)
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-// 2. Redirection de la racine sur index.html (ou indexe.html selon le nom exact de votre fichier)
+// 2. Redirection vers index.html
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
@@ -44,10 +44,10 @@ function startGame(room, roomCode) {
       const socketId = humanSockets[i];
       const s = room.sockets[socketId];
       s.data.color = col;
-      room.state.players[col] = { nickname: s.data.nickname, isBot: false };
+      room.state.players[col] = { pseudo: s.data.pseudo, isBot: false };
     } else {
       botColors.push(col);
-      room.state.players[col] = { nickname: `Bot ${col.toUpperCase()}`, isBot: true };
+      room.state.players[col] = { pseudo: `Bot ${col.toUpperCase()}`, isBot: true };
     }
   });
 
@@ -56,7 +56,7 @@ function startGame(room, roomCode) {
   room.state.turn = colors[0];
   room.state.phase = 'playing';
 
-  io.to(roomCode).emit('game_started', {
+  io.to(roomCode).emit('game_start', {
     gameState: serializeState(room.state),
     colors,
     players: room.state.players,
@@ -110,9 +110,13 @@ function checkBotTurn(room, roomCode) {
 
 io.on('connection', (socket) => {
 
-  socket.on('create_room', ({ nickname, playerCount, withBots }) => {
+  // CRÉER UN SALON
+  socket.on('create_room', ({ pseudo, playerCount, withBots }) => {
     const code = generateRoomCode();
-    socket.data = { nickname, roomCode: code, color: null };
+    const color = 'red'; // Le créateur est Rouge par défaut
+    const token = Math.random().toString(36).substring(2);
+
+    socket.data = { pseudo, roomCode: code, color, token };
 
     rooms[code] = {
       code,
@@ -127,40 +131,63 @@ io.on('connection', (socket) => {
     };
 
     socket.join(code);
-    socket.emit('room_created', { roomCode: code, playerCount: rooms[code].playerCount });
+
+    // Alignement complet avec menu.js
+    socket.emit('room_created', {
+      code,
+      color,
+      token,
+      pseudo,
+      withBots: !!withBots,
+    });
 
     if (withBots) {
       startGame(rooms[code], code);
     }
   });
 
-  socket.on('join_room', ({ nickname, roomCode }) => {
-    const room = getRoom(roomCode);
-    if (!room) return socket.emit('error_msg', 'Salon introuvable.');
-    if (room.started) return socket.emit('error_msg', 'Partie déjà en cours.');
-    if (Object.keys(room.sockets).length >= room.playerCount) return socket.emit('error_msg', 'Salon complet.');
+  // REJOINDRE UN SALON
+  socket.on('join_room', ({ code, pseudo }) => {
+    const room = getRoom(code);
+    if (!room) return socket.emit('error', { message: 'Salon introuvable.' });
+    if (room.started) return socket.emit('error', { message: 'Partie déjà en cours.' });
+    if (Object.keys(room.sockets).length >= room.playerCount) return socket.emit('error', { message: 'Salon complet.' });
 
-    socket.data = { nickname, roomCode, color: null };
+    const colorOrder = ['red', 'blue', 'green', 'yellow'];
+    const usedColors = Object.values(room.sockets).map(s => s.data.color);
+    const color = colorOrder.find(c => !usedColors.includes(c)) || 'blue';
+    const token = Math.random().toString(36).substring(2);
+
+    socket.data = { pseudo, roomCode: code, color, token };
     room.sockets[socket.id] = socket;
-    socket.join(roomCode);
+    socket.join(code);
 
-    io.to(roomCode).emit('player_joined', {
-      playersCount: Object.keys(room.sockets).length,
-      maxPlayers: room.playerCount,
+    socket.emit('room_joined', { code, color, token, pseudo });
+
+    const playersData = {};
+    Object.values(room.sockets).forEach(s => {
+      playersData[s.data.color] = { pseudo: s.data.pseudo, isBot: false };
+    });
+
+    io.to(code).emit('player_joined', {
+      color,
+      pseudo,
+      players: playersData,
     });
 
     if (Object.keys(room.sockets).length === room.playerCount) {
-      startGame(room, roomCode);
+      startGame(room, code);
     }
   });
 
+  // LANCER DE DÉ
   socket.on('roll_dice', () => {
     const room = getRoom(socket.data.roomCode);
     if (!room || !room.started) return;
     const color = socket.data.color;
 
     const res = processDiceRoll(room.state, color);
-    if (!res.ok) return socket.emit('error_msg', res.reason);
+    if (!res.ok) return socket.emit('error', { message: res.reason });
 
     io.to(room.code).emit('dice_rolled', { color, dice: res.dice, gameState: serializeState(room.state) });
 
@@ -188,13 +215,14 @@ io.on('connection', (socket) => {
     }
   });
 
+  // DÉPLACER UN PION
   socket.on('move_pawn', ({ pawnId }) => {
     const room = getRoom(socket.data.roomCode);
     if (!room || !room.started) return;
     const color = socket.data.color;
 
     const res = processMove(room.state, color, pawnId);
-    if (!res.ok) return socket.emit('error_msg', res.reason);
+    if (!res.ok) return socket.emit('error', { message: res.reason });
 
     io.to(room.code).emit('pawn_moved', {
       color,
@@ -211,6 +239,7 @@ io.on('connection', (socket) => {
     }
   });
 
+  // REVANCHE
   socket.on('request_rematch', () => {
     const room = getRoom(socket.data.roomCode);
     if (!room) return;
@@ -233,6 +262,7 @@ io.on('connection', (socket) => {
     }
   });
 
+  // DÉCONNEXION
   socket.on('disconnect', () => {
     const room = getRoom(socket.data.roomCode);
     if (!room) return;
@@ -240,12 +270,12 @@ io.on('connection', (socket) => {
     if (Object.keys(room.sockets).length === 0) {
       delete rooms[room.code];
     } else if (room.started) {
-      io.to(room.code).emit('player_left', { color: socket.data.color });
+      io.to(room.code).emit('opponent_disconnected', { color: socket.data.color });
     }
   });
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Serveur Ludo en écoute sur le port ${PORT}`);
+  console.log(`Serveur Ludo en écoute sur http://localhost:${PORT}`);
 });
