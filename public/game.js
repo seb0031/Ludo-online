@@ -1,6 +1,6 @@
 'use strict';
 /* ═══════════════════════════════════════════════════════════════════
-   GAME.JS — Plateau personnalisé (Cases blanches & étoiles de départ)
+   GAME.JS — Correction affichage dé, rendu pions & déblocage tours
    ═══════════════════════════════════════════════════════════════════ */
 const Game = (() => {
   const canvas = document.getElementById('ludo-board');
@@ -39,23 +39,10 @@ const Game = (() => {
   }
 
   const TRACK = [
-    [0,4],
-    [1,4],[2,4],[3,4],[4,4],
-    [4,3],[4,2],[4,1],[4,0],
-    [5,0],
-    [6,0],[6,1],[6,2],[6,3],
-    [6,4],
-    [7,4],[8,4],[9,4],[10,4],
-    [10,5],
-    [10,6],[9,6],[8,6],[7,6],
-    [6,6],
-    [6,7],[6,8],[6,9],[6,10],
-    [5,10],
-    [4,10],[4,9],[4,8],[4,7],
-    [4,6],
-    [3,6],[2,6],[1,6],[0,6],
-    [0,5],
-    [0,4],
+    [0,4],[1,4],[2,4],[3,4],[4,4],[4,3],[4,2],[4,1],[4,0],[5,0],
+    [6,0],[6,1],[6,2],[6,3],[6,4],[7,4],[8,4],[9,4],[10,4],[10,5],
+    [10,6],[9,6],[8,6],[7,6],[6,6],[6,7],[6,8],[6,9],[6,10],[5,10],
+    [4,10],[4,9],[4,8],[4,7],[4,6],[3,6],[2,6],[1,6],[0,6],[0,5],[0,4]
   ].slice(0, 52);
 
   const STAIRS_CELLS = {
@@ -110,7 +97,6 @@ const Game = (() => {
 
     TRACK.forEach(([c, r], idx) => {
       const x = c*s, y = r*s;
-      
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(x, y, s, s);
       ctx.strokeStyle = '#aaa'; ctx.lineWidth = 0.5;
@@ -160,6 +146,78 @@ const Game = (() => {
     ctx.font = `${s*0.7}px serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText('⭐', cx+cw/2, cy+ch/2);
+  }
+
+  function getPawnCanvasPos(pawn, color) {
+    if (!pawn) return null;
+    const s = SZ;
+    if (pawn.state === 'base') {
+      const slot = BASE_SLOTS[color]?.[pawn.id];
+      if (!slot) return null;
+      return { x: slot[0]*s + s/2, y: slot[1]*s + s/2 };
+    }
+    if (pawn.state === 'track') {
+      if (pawn.trackPos === undefined || pawn.trackPos < 0) return null;
+      const abs = (START_ABS[color] + pawn.trackPos) % 52;
+      const cell = TRACK[abs];
+      if (!cell) return null;
+      
+      const stack = getPawnsOnAbsCell(abs);
+      const off = getCenteringOffset(stack, color, pawn.id);
+      return { x: cell[0]*s + s/2 + off.x, y: cell[1]*s + s/2 + off.y };
+    }
+    if (pawn.state === 'stairs') {
+      const posIdx = Math.min(Math.max(0, pawn.stairsPos || 0), 4);
+      const cell = STAIRS_CELLS[color]?.[posIdx];
+      if (!cell) return { x: 5*s+s/2, y: 5*s+s/2 };
+      return { x: cell[0]*s + s/2, y: cell[1]*s + s/2 };
+    }
+    if (pawn.state === 'finished') {
+      const offsets = { green:[-s*0.22,-s*0.22], red:[s*0.22,-s*0.22], blue:[s*0.22,s*0.22], yellow:[-s*0.22,s*0.22] };
+      const [ox, oy] = offsets[color] || [0,0];
+      return { x: 5*s+s/2+ox, y: 5*s+s/2+oy };
+    }
+    return null;
+  }
+
+  function getPawnsOnAbsCell(abs) {
+    if (!state || !state.pawns) return [];
+    const list = [];
+    Object.entries(state.pawns).forEach(([col, pawns]) => {
+      if (Array.isArray(pawns)) {
+        pawns.forEach(p => {
+          if (p && p.state === 'track') {
+            const pAbs = (START_ABS[col] + p.trackPos) % 52;
+            if (pAbs === abs) list.push({ color: col, id: p.id });
+          }
+        });
+      }
+    });
+    return list;
+  }
+
+  function getCenteringOffset(stack, color, pawnId) {
+    if (stack.length <= 1) return { x: 0, y: 0 };
+    const index = stack.findIndex(p => p.color === color && p.id === pawnId);
+    const d = SZ * 0.15;
+    const offsets = [{x: -d, y: -d}, {x: d, y: d}, {x: -d, y: d}, {x: d, y: -d}];
+    return offsets[index % 4] || {x:0, y:0};
+  }
+
+  function drawPawns(overridePawn) {
+    if (!state || !state.pawns) return;
+    Object.entries(state.pawns).forEach(([color, pawns]) => {
+      if (Array.isArray(pawns)) {
+        pawns.forEach(pawn => {
+          if (overridePawn && overridePawn.color === color && overridePawn.id === pawn.id) return;
+          const pos = getPawnCanvasPos(pawn, color);
+          if (pos) drawPawn(pos.x, pos.y, color, pawn.id + 1, pawn.state === 'finished');
+        });
+      }
+    });
+    if (overridePawn) {
+      drawPawn(overridePawn.x, overridePawn.y, overridePawn.color, overridePawn.id + 1, false);
+    }
 
     if (waitingForPawn && pendingMoves.length > 0) {
       const playableIds = pendingMoves.map(m => m.pawnId);
@@ -170,91 +228,8 @@ const Game = (() => {
         ctx.beginPath();
         ctx.arc(pos.x, pos.y, SZ*0.42, 0, Math.PI*2);
         ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
-        ctx.setLineDash([4, 3]); ctx.stroke(); ctx.setLineDash([]);
+        ctx.stroke();
       });
-    }
-  }
-
-  function getPawnCanvasPos(pawn, color) {
-    const s = SZ;
-    if (pawn.state === 'base') {
-      const [c, r] = BASE_SLOTS[color][pawn.id];
-      return { x: c*s + s/2, y: r*s + s/2 };
-    }
-    if (pawn.state === 'track') {
-      if (pawn.trackPos < 0 || pawn.trackPos > 51) return null;
-      const abs = (START_ABS[color] + pawn.trackPos) % 52;
-      const [c, r] = TRACK[abs];
-      
-      const stack = getPawnsOnAbsCell(abs);
-      const off = getCenteringOffset(stack, color, pawn.id);
-      return { x: c*s + s/2 + off.x, y: r*s + s/2 + off.y };
-    }
-    if (pawn.state === 'stairs') {
-      if (pawn.stairsPos < 0 || pawn.stairsPos > 5) return { x: 5*s+s/2, y: 5*s+s/2 };
-      const [c, r] = STAIRS_CELLS[color][Math.min(pawn.stairsPos, 4)];
-      return { x: c*s + s/2, y: r*s + s/2 };
-    }
-    if (pawn.state === 'finished') {
-      const offsets = { green:[-s*0.22,-s*0.22], red:[s*0.22,-s*0.22], blue:[s*0.22,s*0.22], yellow:[-s*0.22,s*0.22] };
-      const [ox, oy] = offsets[color];
-      return { x: 5*s+s/2+ox, y: 5*s+s/2+oy };
-    }
-    return null;
-  }
-
-  function getPawnsOnAbsCell(abs) {
-    if (!state || !state.pawns) return [];
-    const list = [];
-    Object.entries(state.pawns).forEach(([col, pawns]) => {
-      pawns.forEach(p => {
-        if (p.state === 'track') {
-          const pAbs = (START_ABS[col] + p.trackPos) % 52;
-          if (pAbs === abs) list.push({ color: col, id: p.id });
-        }
-      });
-    });
-    return list;
-  }
-
-  function getCenteringOffset(stack, color, pawnId) {
-    if (stack.length <= 1) return { x: 0, y: 0 };
-    const index = stack.findIndex(p => p.color === color && p.id === pawnId);
-    const d = SZ * 0.15;
-    const offsets2 = [{x: -d, y: -d}, {x: d, y: d}];
-    const offsets3 = [{x: -d, y: -d}, {x: d, y: -d}, {x: 0, y: d}];
-    const offsets4 = [{x: -d, y: -d}, {x: d, y: -d}, {x: -d, y: d}, {x: d, y: d}];
-    
-    if (stack.length === 2) return offsets2[index] || {x:0, y:0};
-    if (stack.length === 3) return offsets3[index] || {x:0, y:0};
-    return offsets4[index % 4] || {x:0, y:0};
-  }
-
-  function drawPawns(overridePawn) {
-    if (!state || !state.pawns) return;
-    Object.entries(state.pawns).forEach(([color, pawns]) => {
-      pawns.forEach(pawn => {
-        if (overridePawn && overridePawn.color === color && overridePawn.id === pawn.id) return;
-        const pos = getPawnCanvasPos(pawn, color);
-        if (pos) drawPawn(pos.x, pos.y, color, pawn.id + 1, pawn.state === 'finished');
-      });
-    });
-    if (overridePawn) {
-      drawPawn(overridePawn.x, overridePawn.y, overridePawn.color, overridePawn.id + 1, false);
-    }
-
-    if (waitingForPawn) {
-      const playableIds = pendingMoves.map(m => m.pawnId);
-      state.pawns[myColor]?.forEach(pawn => {
-        if (!playableIds.includes(pawn.id)) return;
-        const pos = getPawnCanvasPos(pawn, myColor);
-        if (!pos) return;
-        const t = Date.now() / 300;
-        const r = SZ * 0.36 + Math.sin(t) * 3;
-        ctx.beginPath(); ctx.arc(pos.x, pos.y, r, 0, Math.PI*2);
-        ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.stroke();
-      });
-      requestAnimationFrame(() => { drawBoard(); drawPawns(null); });
     }
   }
 
@@ -282,15 +257,13 @@ const Game = (() => {
 
     function doStep() {
       if (stepIdx >= steps.length) { callback(); return; }
-      const step = steps[stepIdx];
-      stepIdx++;
-
+      const step = steps[stepIdx++];
       const s = SZ;
       let targetPos;
       if (step.type === 'track') {
         const abs = (START_ABS[color] + step.rel) % 52;
-        const [c, r] = TRACK[abs];
-        targetPos = { x: c*s + s/2, y: r*s + s/2 };
+        const cell = TRACK[abs];
+        targetPos = { x: cell[0]*s + s/2, y: cell[1]*s + s/2 };
       } else {
         targetPos = { x: 5*s + s/2, y: 5*s + s/2 };
       }
@@ -305,9 +278,8 @@ const Game = (() => {
 
       function frame(now) {
         const p = Math.min(1, (now - start) / duration);
-        const ease = 1 - (1 - p) * (1 - p);
-        override.x = startPos.x + (targetPos.x - startPos.x) * ease;
-        override.y = startPos.y + (targetPos.y - startPos.y) * ease;
+        override.x = startPos.x + (targetPos.x - startPos.x) * p;
+        override.y = startPos.y + (targetPos.y - startPos.y) * p;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         drawBoard();
         drawPawns(override);
@@ -319,45 +291,20 @@ const Game = (() => {
     doStep();
   }
 
-  function animateCapture(x, y, color, callback) {
-    if (typeof Audio !== 'undefined' && Audio.playCapture) Audio.playCapture();
-    let frame = 0;
-    const totalFrames = 18;
-    function bounce() {
-      frame++;
-      const scale = 1 + Math.sin(frame / totalFrames * Math.PI) * 0.5;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      drawBoard(); drawPawns(null);
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.scale(scale, scale);
-      ctx.globalAlpha = 1 - frame / totalFrames;
-      drawPawn(0, 0, color, '✕', false);
-      for (let i = 0; i < 6; i++) {
-        const angle = (i / 6) * Math.PI * 2;
-        const dist = (frame / totalFrames) * SZ * 0.8;
-        ctx.fillStyle = '#ffd700';
-        ctx.font = `${SZ * 0.3}px serif`;
-        ctx.fillText('★', Math.cos(angle) * dist, Math.sin(angle) * dist);
-      }
-      ctx.restore();
-      if (frame < totalFrames) requestAnimationFrame(bounce);
-      else { render(); callback(); }
-    }
-    requestAnimationFrame(bounce);
-  }
-
   function triggerDiceRollAnimation(finalDiceValue, onComplete) {
     const diceEl = $('dice');
     const faceEl = $('dice-face');
-    if (!diceEl || !faceEl) { onComplete(); return; }
+    if (!diceEl || !faceEl) { 
+      isDiceRolling = false;
+      onComplete(); 
+      return; 
+    }
 
     isDiceRolling = true;
     diceEl.classList.add('rolling');
-    if (typeof Audio !== 'undefined' && Audio.playDiceRoll) Audio.playDiceRoll();
 
     let rollCount = 0;
-    const maxRolls = 12;
+    const maxRolls = 10;
     const interval = setInterval(() => {
       rollCount++;
       const tempVal = Math.floor(Math.random() * 6) + 1;
@@ -367,12 +314,10 @@ const Game = (() => {
         clearInterval(interval);
         diceEl.classList.remove('rolling');
         faceEl.textContent = DICE_SYMBOLS[finalDiceValue] || '🎲';
-        diceEl.classList.add('bounce');
-        setTimeout(() => diceEl.classList.remove('bounce'), 300);
         isDiceRolling = false;
         onComplete();
       }
-    }, 55);
+    }, 50);
   }
 
   function handleClick(e) {
@@ -393,7 +338,6 @@ const Game = (() => {
         waitingForPawn = false;
         pendingMoves   = [];
         socket.emit('move_pawn', { pawnId: pawn.id });
-        if (typeof Audio !== 'undefined' && Audio.playClick) Audio.playClick();
         render();
         return;
       }
@@ -417,7 +361,7 @@ const Game = (() => {
       if (!p || (state.activeColors && !state.activeColors.includes(c))) { chip.style.display = 'none'; return; }
       chip.style.display = 'flex';
       const nameEl = $(`name-${c}`);
-      if (nameEl) nameEl.textContent = (p.pseudo || p.nickname || c) + (p.isBot ? ' 🤖' : '');
+      if (nameEl) nameEl.textContent = (p.pseudo || c) + (p.isBot ? ' 🤖' : '');
       chip.classList.toggle('active-turn', state.turn === c);
     });
 
@@ -426,11 +370,11 @@ const Game = (() => {
       const isMyTurn = state.turn === myColor;
       const isBot = state.players && state.players[state.turn]?.isBot;
       if (isMyTurn) {
-        banner.textContent = state.diceRolled ? '👆 Choisissez un cheval' : '🎲 À vous de lancer !';
+        banner.textContent = state.diceRolled ? '👆 Choisissez un pion' : '🎲 Lancer le dé';
         banner.className   = 'turn-banner my-turn';
       } else {
-        const pseudo = (state.players && state.players[state.turn]?.pseudo) || state.turn || '?';
-        banner.textContent = `⏳ Tour de ${pseudo}${isBot ? ' 🤖' : ''}…`;
+        const pseudo = (state.players && state.players[state.turn]?.pseudo) || state.turn;
+        banner.textContent = `⏳ Tour de ${pseudo}${isBot ? ' 🤖' : ''}`;
         banner.className   = isBot ? 'turn-banner bot-turn' : 'turn-banner';
       }
     }
@@ -450,180 +394,88 @@ const Game = (() => {
     }
 
     switch (event) {
-
       case 'dice_rolled': {
         triggerDiceRollAnimation(data.dice, () => {
-          if (data.dice === 6 && typeof Audio !== 'undefined' && Audio.playSix) Audio.playSix();
-
-          if (data.skipped) {
-            updateUI(); render();
-            showToast(`3 six de suite — tour perdu !`, 2200);
-            return;
-          }
-          if (data.autoPass) {
-            updateUI(); render();
-            showToast(`${COLOR_NAMES[data.color] || data.color} ne peut pas jouer !`, 1600);
+          if (data.skipped || data.autoPass) {
+            waitingForPawn = false;
+            pendingMoves = [];
+            updateUI(); 
+            render();
             return;
           }
           if (data.moves?.length > 0 && data.color === myColor) {
             pendingMoves   = data.moves;
             waitingForPawn = true;
           }
-          updateUI(); render();
+          updateUI(); 
+          render();
         });
         break;
       }
 
-      case 'move_made':
       case 'pawn_moved': {
-        const { color, pawnId, captures, steps } = data;
+        const { color, pawnId, steps } = data;
         animating = true;
         waitingForPawn = false;
         pendingMoves   = [];
 
         animatePawnSteps(color, pawnId, steps || [], () => {
-          if (captures && captures.length > 0) {
-            let captureIdx = 0;
-            function doNextCapture() {
-              if (captureIdx >= captures.length) { finishMove(); return; }
-              const cap = captures[captureIdx++];
-              const abs = START_ABS[color];
-              const [c, r] = TRACK[abs];
-              animateCapture(c*SZ + SZ/2, r*SZ + SZ/2, cap.color, doNextCapture);
-              showToast(`💥 ${COLOR_NAMES[cap.color]} retourne à l'écurie !`, 2000);
-            }
-            doNextCapture();
-          } else {
-            finishMove();
-          }
-        });
-
-        function finishMove() {
           animating = false;
           render();
           updateUI();
-          if (data.replay) showToast(`${COLOR_NAMES[color]} rejoue !`, 1200);
-        }
+        });
         break;
       }
 
       case 'turn_changed': {
-        updateUI(); render();
+        waitingForPawn = false;
+        pendingMoves = [];
+        isDiceRolling = false;
+        updateUI(); 
+        render();
         break;
       }
-
-      case 'game_over': {
-        animating = false;
-        render(); updateUI();
-        if (typeof Audio !== 'undefined' && Audio.playVictory) Audio.playVictory();
-        setTimeout(() => showGameOver(data), 800);
-        break;
-      }
-
-      case 'opponent_disconnected':
-        if ($('modal-disconnect')) $('modal-disconnect').style.display = 'flex'; break;
-      case 'opponent_reconnected':
-        if ($('modal-disconnect')) $('modal-disconnect').style.display = 'none'; break;
-      case 'rematch_requested':
-        if ($('rematch-status')) $('rematch-status').textContent = 'Un joueur veut rejouer !'; break;
 
       case 'game_start':
       case 'game_started':
-      case 'rematch_start':
-        if ($('modal-gameover')) $('modal-gameover').style.display = 'none';
-        if ($('rematch-status')) $('rematch-status').textContent   = '';
-        if ($('btn-rematch')) {
-          $('btn-rematch').textContent       = '🔄 Rejouer';
-          $('btn-rematch').disabled          = false;
-        }
         animating      = false;
         waitingForPawn = false;
+        isDiceRolling  = false;
         pendingMoves   = [];
-        updateUI(); render();
-        if (typeof Audio !== 'undefined' && Audio.playStart) Audio.playStart();
+        updateUI(); 
+        render();
         break;
     }
   }
 
-  function showToast(msg, dur) {
-    let t = document.getElementById('toast');
-    if (!t) {
-      t = document.createElement('div'); t.id = 'toast';
-      Object.assign(t.style, {
-        position:'fixed', bottom:'90px', left:'50%', transform:'translateX(-50%)',
-        background:'rgba(0,0,0,.82)', color:'#fff', padding:'10px 22px',
-        borderRadius:'22px', zIndex:'999', fontSize:'.9rem',
-        fontFamily:'Nunito,sans-serif', fontWeight:'700',
-        pointerEvents:'none', transition:'opacity .3s', whiteSpace:'nowrap',
-      });
-      document.body.appendChild(t);
-    }
-    t.textContent = msg; t.style.opacity = '1';
-    clearTimeout(t._h);
-    t._h = setTimeout(() => { t.style.opacity = '0'; }, dur || 2000);
-  }
+  function init(sock, payload) {
+    socket = sock;
+    state  = payload.gameState || payload.state;
+    if (payload.color) myColor = payload.color;
 
-  function showGameOver(data) {
-    const medals = ['🥇','🥈','🥉','4️⃣'];
-    const dotColor = { green:'#3cb043', red:'#e02020', blue:'#2060e0', yellow:'#e0b800' };
-    if ($('gameover-trophies')) $('gameover-trophies').textContent = data.winner === myColor ? '🏆🎉🏆' : '🎲';
-    if ($('gameover-title')) {
-      $('gameover-title').textContent = data.winner === myColor ? 'VICTOIRE !' :
-        `${state?.players[data.winner]?.pseudo || '?'} gagne !`;
-    }
-    if ($('gameover-rankings')) {
-      $('gameover-rankings').innerHTML = (data.rankings || []).map((c, i) =>
-        `<div class="ranking-row">
-          <span class="ranking-pos">${medals[i]||i+1}</span>
-          <span class="ranking-color" style="background:${dotColor[c]}"></span>
-          <span class="ranking-name">${state?.players[c]?.pseudo || c}</span>
-        </div>`
-      ).join('');
-    }
-    if ($('modal-gameover')) $('modal-gameover').style.display = 'flex';
-  }
+    animating = false; 
+    waitingForPawn = false; 
+    pendingMoves = []; 
+    isDiceRolling = false;
 
-  function init(sock, payload, isReconnect) {
-    socket  = sock;
-    state   = payload.gameState || payload.state;
+    resize(); 
+    updateUI(); 
+    render();
 
-    if (payload.color) {
-      myColor = payload.color;
-    } else if (isReconnect && localStorage.getItem('ludo_color')) {
-      myColor = localStorage.getItem('ludo_color');
-    } else if (state && state.players) {
-      const foundColor = Object.keys(state.players).find(
-        c => state.players[c].id === socket.id
-      );
-      if (foundColor) myColor = foundColor;
-    }
-
-    localStorage.setItem('ludo_color', myColor);
-
-    animating = false; waitingForPawn = false; pendingMoves = []; isDiceRolling = false;
-    window.animEnabled = $('opt-anim')?.checked !== false;
-
-    resize(); updateUI(); render();
-
-    canvas.removeEventListener('click',    handleClick);
-    canvas.removeEventListener('touchend', handleClick);
-    canvas.addEventListener('click',    handleClick);
-    canvas.addEventListener('touchend', handleClick, { passive: false });
+    canvas.removeEventListener('click', handleClick);
+    canvas.addEventListener('click', handleClick);
 
     const diceBtn = $('dice');
     if (diceBtn) {
       diceBtn.onclick = (e) => {
         e.preventDefault();
         if (animating || isDiceRolling) return;
-        if (typeof Audio !== 'undefined' && Audio.init) Audio.init();
         if (!state || state.phase !== 'playing') return;
         if (state.turn !== myColor || state.diceRolled) return;
 
         socket.emit('roll_dice');
       };
     }
-
-    $('opt-anim')?.addEventListener('change', e => { window.animEnabled = e.target.checked; });
   }
 
   window.addEventListener('resize', () => { if (state) resize(); });
