@@ -11,7 +11,13 @@ const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] }
 });
 
-app.use(express.static(path.join(__dirname, 'public')));
+// On remonte d'un dossier ('..') pour pointer vers le dossier 'public' situé à la racine
+app.use(express.static(path.join(__dirname, '..', 'public')));
+
+// Route par défaut pour rediriger les requêtes vers index.html
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+});
 
 // ── CONSTANTES DU JEU ────────────────────────────────────────────────
 const COLORS = ['green', 'red', 'blue', 'yellow'];
@@ -62,10 +68,10 @@ function getPlayableMoves(state, color, diceValue) {
       if (newPos < 40) {
         moves.push({ pawnId: pawn.id, type: 'track', newPos });
       } else if (newPos === 40) {
-        // Arrivée au pied des escaliers (marche 1)
+        // Arrivée au pied des escaliers
         moves.push({ pawnId: pawn.id, type: 'stairs_enter', step: 1 });
       } else {
-        // Dépassement : rentre dans les escaliers si diceValue le permet
+        // Rentres dans les escaliers si le jeton le permet
         const step = newPos - 39;
         if (step <= 6) {
           moves.push({ pawnId: pawn.id, type: 'stairs', step });
@@ -75,7 +81,6 @@ function getPlayableMoves(state, color, diceValue) {
     // 3. Avancée dans les escaliers
     else if (pawn.state === 'stairs') {
       const currentStep = pawn.stairsPos;
-      // On doit faire exactement le chiffre de la marche suivante
       if (diceValue === currentStep) {
         if (currentStep === 6) {
           moves.push({ pawnId: pawn.id, type: 'finish' });
@@ -140,7 +145,6 @@ function applyPawnMove(state, color, pawnId) {
         if (otherPawn.state === 'track') {
           const otherAbsPos = (START_POSITIONS[otherColor] + otherPawn.trackPos) % 52;
           if (myAbsPos === otherAbsPos) {
-            // Capture ! Le pion ennemi retourne à la base
             otherPawn.state = 'base';
             otherPawn.trackPos = -1;
             captures.push({ color: otherColor, pawnId: otherPawn.id });
@@ -161,7 +165,7 @@ function nextTurn(state) {
   state.diceRolled = false;
 }
 
-// ── SOCKET.IO HANDLERS ───────────────────────────────────────────────
+// ── GESTION DE SOCKET.IO ───────────────────────────────────────────────
 
 io.on('connection', (socket) => {
   let currentRoom = null;
@@ -180,7 +184,6 @@ io.on('connection', (socket) => {
       state: createInitialState(colors)
     };
 
-    // Assigner les bots si besoin
     colors.slice(1).forEach((col, idx) => {
       room.players[col] = { id: `bot_${idx}`, pseudo: `Bot ${col}`, isBot: true };
     });
@@ -228,7 +231,6 @@ io.on('connection', (socket) => {
 
     const moves = getPlayableMoves(state, playerColor, diceValue);
 
-    // Si aucun coup possible, on passe le tour automatiquement après un délai
     if (moves.length === 0) {
       io.to(currentRoom).emit('dice_rolled', {
         color: playerColor,
@@ -242,7 +244,7 @@ io.on('connection', (socket) => {
         if (diceValue !== 6) {
           nextTurn(state);
         } else {
-          state.diceRolled = false; // Rejoue car il a fait un 6
+          state.diceRolled = false;
         }
         io.to(currentRoom).emit('turn_changed', { gameState: state });
       }, 1200);
@@ -276,7 +278,6 @@ io.on('connection', (socket) => {
       gameState: state
     });
 
-    // Un 6 permet de rejouer
     if (lastDice === 6) {
       state.diceRolled = false;
       state.dice = null;
@@ -291,11 +292,11 @@ io.on('connection', (socket) => {
     if (currentRoom) {
       const room = rooms.get(currentRoom);
       if (room && room.players[playerColor]) {
-        room.players[playerColor].isBot = true; // Remplacé par un bot
+        room.players[playerColor].isBot = true;
       }
     }
   });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Serveur démarré sur http://localhost:${PORT}`));
+server.listen(PORT, () => console.log(`Serveur démarré sur le port ${PORT}`));
