@@ -11,22 +11,16 @@ const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] }
 });
 
-// On remonte d'un dossier ('..') pour pointer vers le dossier 'public' situé à la racine
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-// Route par défaut pour rediriger les requêtes vers index.html
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
-// ── CONSTANTES DU JEU ────────────────────────────────────────────────
 const COLORS = ['green', 'red', 'blue', 'yellow'];
 const START_POSITIONS = { red: 10, blue: 20, yellow: 30, green: 40 };
 
-// Stockage des salles en mémoire
 const rooms = new Map();
-
-// ── LOGIQUE DES MOUVEMENTS ET RÈGLES ─────────────────────────────────
 
 function createInitialState(activeColors = ['green', 'red']) {
   const pawns = {};
@@ -56,36 +50,24 @@ function getPlayableMoves(state, color, diceValue) {
   if (!playerPawns) return moves;
 
   playerPawns.forEach(pawn => {
-    // 1. Sortie d'écurie (nécessite un 6)
     if (pawn.state === 'base') {
-      if (diceValue === 6) {
-        moves.push({ pawnId: pawn.id, type: 'spawn' });
-      }
-    }
-    // 2. Avancée sur le parcours principal
-    else if (pawn.state === 'track') {
+      if (diceValue === 6) moves.push({ pawnId: pawn.id, type: 'spawn' });
+    } else if (pawn.state === 'track') {
       const newPos = pawn.trackPos + diceValue;
       if (newPos < 40) {
         moves.push({ pawnId: pawn.id, type: 'track', newPos });
       } else if (newPos === 40) {
-        // Arrivée au pied des escaliers
         moves.push({ pawnId: pawn.id, type: 'stairs_enter', step: 1 });
       } else {
-        // Rentres dans les escaliers si le jeton le permet
         const step = newPos - 39;
-        if (step <= 6) {
-          moves.push({ pawnId: pawn.id, type: 'stairs', step });
-        }
+        if (step <= 6) moves.push({ pawnId: pawn.id, type: 'stairs', step });
       }
-    }
-    // 3. Avancée dans les escaliers
-    else if (pawn.state === 'stairs') {
-      const currentStep = pawn.stairsPos;
-      if (diceValue === currentStep) {
-        if (currentStep === 6) {
+    } else if (pawn.state === 'stairs') {
+      if (diceValue === pawn.stairsPos) {
+        if (pawn.stairsPos === 6) {
           moves.push({ pawnId: pawn.id, type: 'finish' });
         } else {
-          moves.push({ pawnId: pawn.id, type: 'stairs_up', step: currentStep + 1 });
+          moves.push({ pawnId: pawn.id, type: 'stairs_up', step: pawn.stairsPos + 1 });
         }
       }
     }
@@ -106,8 +88,7 @@ function applyPawnMove(state, color, pawnId) {
     pawn.state = 'track';
     pawn.trackPos = 0;
     steps.push({ type: 'track', rel: 0 });
-  } 
-  else if (pawn.state === 'track') {
+  } else if (pawn.state === 'track') {
     const start = pawn.trackPos;
     const target = start + diceValue;
 
@@ -122,8 +103,7 @@ function applyPawnMove(state, color, pawnId) {
       pawn.stairsPos = 1;
       steps.push({ type: 'stairs', pos: 1 });
     }
-  } 
-  else if (pawn.state === 'stairs') {
+  } else if (pawn.state === 'stairs') {
     if (diceValue === pawn.stairsPos) {
       if (pawn.stairsPos === 6) {
         pawn.state = 'finished';
@@ -135,10 +115,8 @@ function applyPawnMove(state, color, pawnId) {
     }
   }
 
-  // Vérification de la capture d'un adversaire
   if (pawn.state === 'track') {
     const myAbsPos = (START_POSITIONS[color] + pawn.trackPos) % 52;
-
     Object.entries(state.pawns).forEach(([otherColor, pawns]) => {
       if (otherColor === color) return;
       pawns.forEach(otherPawn => {
@@ -165,7 +143,84 @@ function nextTurn(state) {
   state.diceRolled = false;
 }
 
-// ── GESTION DE SOCKET.IO ───────────────────────────────────────────────
+function checkBotTurn(roomCode) {
+  const room = rooms.get(roomCode);
+  if (!room || room.state.phase !== 'playing') return;
+
+  const currentTurn = room.state.turn;
+  const player = room.players[currentTurn];
+
+  if (player && player.isBot) {
+    setTimeout(() => {
+      handleBotPlay(roomCode, currentTurn);
+    }, 1000);
+  }
+}
+
+function handleBotPlay(roomCode, botColor) {
+  const room = rooms.get(roomCode);
+  if (!room || room.state.turn !== botColor) return;
+
+  const state = room.state;
+  if (state.diceRolled) return;
+
+  const diceValue = Math.floor(Math.random() * 6) + 1;
+  state.dice = diceValue;
+  state.diceRolled = true;
+
+  const moves = getPlayableMoves(state, botColor, diceValue);
+
+  if (moves.length === 0) {
+    io.to(roomCode).emit('dice_rolled', {
+      color: botColor,
+      dice: diceValue,
+      gameState: state,
+      moves: [],
+      skipped: true
+    });
+
+    setTimeout(() => {
+      if (diceValue !== 6) nextTurn(state);
+      else state.diceRolled = false;
+      
+      io.to(roomCode).emit('turn_changed', { gameState: state });
+      checkBotTurn(roomCode);
+    }, 1200);
+  } else {
+    io.to(roomCode).emit('dice_rolled', {
+      color: botColor,
+      dice: diceValue,
+      gameState: state,
+      moves: moves,
+      skipped: false
+    });
+
+    setTimeout(() => {
+      const chosenMove = moves.find(m => m.type === 'spawn') || moves[0];
+      const lastDice = state.dice;
+      const { steps, captures } = applyPawnMove(state, botColor, chosenMove.pawnId);
+
+      io.to(roomCode).emit('pawn_moved', {
+        color: botColor,
+        pawnId: chosenMove.pawnId,
+        steps: steps,
+        captures: captures,
+        gameState: state
+      });
+
+      setTimeout(() => {
+        if (lastDice === 6) {
+          state.diceRolled = false;
+          state.dice = null;
+        } else {
+          nextTurn(state);
+        }
+        io.to(roomCode).emit('turn_changed', { gameState: state });
+        checkBotTurn(roomCode);
+      }, 800);
+    }, 1000);
+  }
+}
 
 io.on('connection', (socket) => {
   let currentRoom = null;
@@ -194,6 +249,7 @@ io.on('connection', (socket) => {
 
     socket.join(roomCode);
     socket.emit('room_created', { roomCode, color: playerColor, gameState: room.state });
+    checkBotTurn(roomCode);
   });
 
   socket.on('join_room', ({ roomCode, pseudo }) => {
@@ -215,6 +271,7 @@ io.on('connection', (socket) => {
 
     socket.join(room.code);
     io.to(room.code).emit('game_started', { gameState: room.state, players: room.players });
+    checkBotTurn(room.code);
   });
 
   socket.on('roll_dice', () => {
@@ -241,12 +298,11 @@ io.on('connection', (socket) => {
       });
 
       setTimeout(() => {
-        if (diceValue !== 6) {
-          nextTurn(state);
-        } else {
-          state.diceRolled = false;
-        }
+        if (diceValue !== 6) nextTurn(state);
+        else state.diceRolled = false;
+        
         io.to(currentRoom).emit('turn_changed', { gameState: state });
+        checkBotTurn(currentRoom);
       }, 1200);
     } else {
       io.to(currentRoom).emit('dice_rolled', {
@@ -281,11 +337,12 @@ io.on('connection', (socket) => {
     if (lastDice === 6) {
       state.diceRolled = false;
       state.dice = null;
-      io.to(currentRoom).emit('turn_changed', { gameState: state });
     } else {
       nextTurn(state);
-      io.to(currentRoom).emit('turn_changed', { gameState: state });
     }
+    
+    io.to(currentRoom).emit('turn_changed', { gameState: state });
+    checkBotTurn(currentRoom);
   });
 
   socket.on('disconnect', () => {
