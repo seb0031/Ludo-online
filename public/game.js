@@ -402,6 +402,14 @@ const Game = (() => {
 
   function updateUI() {
     if (!state) return;
+
+    if (socket && state.players) {
+      const foundColor = Object.keys(state.players).find(
+        c => state.players[c].id === socket.id
+      );
+      if (foundColor) myColor = foundColor;
+    }
+
     ['green','red','blue','yellow'].forEach(c => {
       const chip = $(`chip-${c}`);
       if (!chip) return;
@@ -578,7 +586,20 @@ const Game = (() => {
   function init(sock, payload, isReconnect) {
     socket  = sock;
     state   = payload.gameState || payload.state;
-    myColor = isReconnect ? payload.color : (localStorage.getItem('ludo_color') || 'green');
+
+    if (payload.color) {
+      myColor = payload.color;
+    } else if (isReconnect && localStorage.getItem('ludo_color')) {
+      myColor = localStorage.getItem('ludo_color');
+    } else if (state && state.players) {
+      const foundColor = Object.keys(state.players).find(
+        c => state.players[c].id === socket.id
+      );
+      if (foundColor) myColor = foundColor;
+    }
+
+    localStorage.setItem('ludo_color', myColor);
+
     animating = false; waitingForPawn = false; pendingMoves = []; isDiceRolling = false;
     window.animEnabled = $('opt-anim')?.checked !== false;
 
