@@ -40,16 +40,13 @@ const Audio = (() => {
     src.start(start); src.stop(start + dur);
   }
 
-  // ── Son : un pas de déplacement (petit clic/toc) ─────────────
   function playStep() {
     if (!settings.sfx) return;
     const c = getCtx(), now = c.currentTime;
-    // Petit toc de sabot de cheval
     noise(now, 0.04, 0.25, 2500);
     osc(480, 'triangle', now, 0.04, 0.18);
   }
 
-  // ── Son : lancer de dé (bruit de roulement) ───────────────────
   function playDiceRoll() {
     if (!settings.sfx) return;
     const c = getCtx(), now = c.currentTime;
@@ -59,7 +56,6 @@ const Audio = (() => {
     osc(200, 'sine', now + 0.3, 0.08, 0.15);
   }
 
-  // ── Son : 6 (fanfare) ─────────────────────────────────────────
   function playSix() {
     if (!settings.sfx) return;
     const c = getCtx(), now = c.currentTime;
@@ -67,21 +63,17 @@ const Audio = (() => {
       osc(f, 'triangle', now + i * 0.07, 0.18, 0.35));
   }
 
-  // ── Son : collision / retour à l'écurie ───────────────────────
   function playCapture() {
     if (!settings.sfx) return;
     const c = getCtx(), now = c.currentTime;
-    // Impact sourd + descente dramatique
     noise(now, 0.12, 0.55, 700);
     osc(300, 'sawtooth', now,       0.1,  0.4);
     osc(200, 'sawtooth', now + 0.05, 0.12, 0.3);
     osc(120, 'sine',     now + 0.12, 0.15, 0.3);
-    // Petite mélodie triste descendante
     [440, 370, 294, 220].forEach((f, i) =>
       osc(f, 'triangle', now + 0.2 + i * 0.09, 0.1, 0.2));
   }
 
-  // ── Son : sortie de l'écurie ──────────────────────────────────
   function playExitBase() {
     if (!settings.sfx) return;
     const c = getCtx(), now = c.currentTime;
@@ -89,7 +81,6 @@ const Audio = (() => {
       osc(f, 'triangle', now + i * 0.07, 0.15, 0.35));
   }
 
-  // ── Son : victoire ────────────────────────────────────────────
   function playVictory() {
     if (!settings.sfx) return;
     const c = getCtx(), now = c.currentTime;
@@ -97,7 +88,6 @@ const Audio = (() => {
       osc(f, 'triangle', now + i * 0.14, 0.18, 0.4));
   }
 
-  // ── Son : début de partie ─────────────────────────────────────
   function playStart() {
     if (!settings.sfx) return;
     const c = getCtx(), now = c.currentTime;
@@ -105,14 +95,12 @@ const Audio = (() => {
       osc(f, 'triangle', now + i * 0.1, 0.2, 0.35));
   }
 
-  // ── Son : clic bouton ─────────────────────────────────────────
   function playClick() {
     if (!settings.sfx) return;
     const c = getCtx(), now = c.currentTime;
     osc(680, 'sine', now, 0.04, 0.22);
   }
 
-  // ── Musique générative joyeuse ────────────────────────────────
   const SCALE = [0,2,4,5,7,9,11];
   const ROOT  = 60;
   function mf(m) { return 440 * Math.pow(2, (m-69)/12); }

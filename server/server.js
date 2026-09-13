@@ -22,7 +22,6 @@ app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'in
 io.on('connection', (socket) => {
   console.log(`[+] ${socket.id}`);
 
-  // ── Créer une partie ─────────────────────────────────────────────────
   socket.on('create_room', ({ pseudo, playerCount, withBots }) => {
     const p = (pseudo || 'Joueur').slice(0, 20);
     const pc = Math.min(Math.max(parseInt(playerCount) || 4, 2), 4);
@@ -41,13 +40,11 @@ io.on('connection', (socket) => {
 
     console.log(`Salon ${result.code} créé par ${p} (${pc}j, bots:${withBots})`);
 
-    // Démarrage immédiat si c'est du solo avec bots
     if (withBots) {
       startGame(room, result.code);
     }
   });
 
-  // ── Rejoindre ────────────────────────────────────────────────────────
   socket.on('join_room', ({ code, pseudo }) => {
     const code_ = (code || '').toUpperCase().trim();
     const p     = (pseudo || 'Joueur').slice(0, 20);
@@ -62,7 +59,6 @@ io.on('connection', (socket) => {
 
     socket.emit('room_joined', { code: code_, color: result.color, token: result.token, pseudo: p });
 
-    // Notifier tous les membres du salon
     io.to(code_).emit('player_joined', {
       color: result.color, pseudo: p,
       players: room.state.players,
@@ -70,13 +66,11 @@ io.on('connection', (socket) => {
 
     console.log(`[DEBUG] Connexion au salon ${code_}. Humains prêts :`, allHumansConnected(room));
 
-    // Lancement de la partie dès que tout le monde est connecté
     if (allHumansConnected(room) && !room.started) {
       startGame(room, code_);
     }
   });
 
-  // ── Reconnexion ──────────────────────────────────────────────────────
   socket.on('reconnect_token', ({ token }) => {
     const result = reconnectWithToken(token, socket.id);
     if (!result) { socket.emit('error', { message: 'Token invalide' }); return; }
@@ -95,7 +89,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ── Lancer le dé ────────────────────────────────────────────────────
   socket.on('roll_dice', () => {
     const room  = getRoom(socket.data.roomCode);
     const color = socket.data.color;
@@ -123,7 +116,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ── Jouer un pion ────────────────────────────────────────────────────
   socket.on('move_pawn', ({ pawnId }) => {
     const room  = getRoom(socket.data.roomCode);
     const color = socket.data.color;
@@ -132,7 +124,6 @@ io.on('connection', (socket) => {
     doMove(room, color, pawnId);
   });
 
-  // ── Déconnexion ──────────────────────────────────────────────────────
   socket.on('disconnect', () => {
     const result = disconnectPlayer(socket.id);
     if (result) {
@@ -140,7 +131,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ── Nouvelle partie ──────────────────────────────────────────────────
   socket.on('request_rematch', () => {
     const room = getRoom(socket.data.roomCode);
     if (!room) return;
@@ -171,7 +161,6 @@ io.on('connection', (socket) => {
   });
 });
 
-// ─── Démarrage de la partie ───────────────────────────────────────────────────
 function startGame(room, code) {
   room.started = true;
   room.state.phase = 'playing';

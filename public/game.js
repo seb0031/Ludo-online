@@ -1,18 +1,16 @@
 'use strict';
 /* ═══════════════════════════════════════════════════════════════════
-   GAME.JS — Plateau + Numérotation + Dé animé + Centrage des pions
+   GAME.JS — Plateau personnalisé (Cases blanches & étoiles de départ)
    ═══════════════════════════════════════════════════════════════════ */
 const Game = (() => {
   const canvas = document.getElementById('ludo-board');
   const ctx    = canvas.getContext('2d');
   function $(id) { return document.getElementById(id); }
 
-  // ── État ─────────────────────────────────────────────────────────
   let socket = null, myColor = 'green', state = null;
   let pendingMoves = [], waitingForPawn = false;
   let animating = false, isDiceRolling = false;
 
-  // ── Palette ───────────────────────────────────────────────────────
   const PAL = {
     green:  { main:'#3cb043', light:'#6dd672', dark:'#267328', bg:'#e8f8e9', home:'#3cb043' },
     red:    { main:'#e02020', light:'#ff5555', dark:'#a01010', bg:'#fdeaea', home:'#e02020' },
@@ -73,8 +71,8 @@ const Game = (() => {
     yellow: [[1,8],[2,8],[1,9],[2,9]],
   };
 
-  const START_ABS = { green:0, red:13, blue:26, yellow:39 };
-  const SAFE_ABS = [0,8,13,21,26,34,39,47];
+  // Nouveaux indices de départ selon tes consignes
+  const START_ABS = { red:10, blue:20, yellow:30, green:40 };
 
   function render() {
     if (!state) return;
@@ -112,28 +110,30 @@ const Game = (() => {
 
     TRACK.forEach(([c, r], idx) => {
       const x = c*s, y = r*s;
-      let bg = '#ffffff';
-      if (idx === START_ABS.green)  bg = PAL.green.main;
-      if (idx === START_ABS.red)    bg = PAL.red.main;
-      if (idx === START_ABS.blue)   bg = PAL.blue.main;
-      if (idx === START_ABS.yellow) bg = PAL.yellow.main;
-      ctx.fillStyle = bg;
+      
+      // Toutes les cases du parcours sont blanches
+      ctx.fillStyle = '#ffffff';
       ctx.fillRect(x, y, s, s);
       ctx.strokeStyle = '#aaa'; ctx.lineWidth = 0.5;
       ctx.strokeRect(x, y, s, s);
 
-      if (SAFE_ABS.includes(idx) && !Object.values(START_ABS).includes(idx)) {
-        ctx.fillStyle = 'rgba(0,0,0,0.15)';
-        ctx.font = `${s*0.55}px serif`;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText('⭐', x+s/2, y+s/2);
-      }
+      // Vérification si la case est une case de départ
+      const startColorEntry = Object.entries(START_ABS).find(([_, pos]) => pos === idx);
 
-      const isStart = Object.values(START_ABS).includes(idx);
-      ctx.fillStyle = isStart ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.35)';
-      ctx.font = `bold ${Math.max(9, s*0.25)}px Nunito, sans-serif`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(idx, x + s/2, y + s/2);
+      if (startColorEntry) {
+        const colorKey = startColorEntry[0];
+        // Étoile de la couleur correspondante
+        ctx.fillStyle = PAL[colorKey].main;
+        ctx.font = `${s*0.65}px serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('★', x+s/2, y+s/2);
+      } else {
+        // Numéro simple sur fond blanc pour toutes les autres cases
+        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+        ctx.font = `bold ${Math.max(9, s*0.25)}px Nunito, sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(idx, x + s/2, y + s/2);
+      }
     });
 
     const stairColors = { green: PAL.green.main, red: PAL.red.main, blue: PAL.blue.main, yellow: PAL.yellow.main };
@@ -179,7 +179,6 @@ const Game = (() => {
     }
   }
 
-  // ── RECALCUL ET CENTRAGE PARFAIT DES PIONS ────────────────────────
   function getPawnCanvasPos(pawn, color) {
     const s = SZ;
     if (pawn.state === 'base') {
@@ -191,7 +190,6 @@ const Game = (() => {
       const abs = (START_ABS[color] + pawn.trackPos) % 52;
       const [c, r] = TRACK[abs];
       
-      // Récupération des pions présents sur la même case pour équilibrer le centrage
       const stack = getPawnsOnAbsCell(abs);
       const off = getCenteringOffset(stack, color, pawn.id);
       return { x: c*s + s/2 + off.x, y: r*s + s/2 + off.y };
@@ -224,7 +222,7 @@ const Game = (() => {
   }
 
   function getCenteringOffset(stack, color, pawnId) {
-    if (stack.length <= 1) return { x: 0, y: 0 }; // Parfaitement centré si seul sur la case
+    if (stack.length <= 1) return { x: 0, y: 0 };
     const index = stack.findIndex(p => p.color === color && p.id === pawnId);
     const d = SZ * 0.15;
     const offsets2 = [{x: -d, y: -d}, {x: d, y: d}];

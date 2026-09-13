@@ -147,7 +147,6 @@ input:checked + .toggle-slider::before { transform: translateX(24px); }
   overflow: hidden;
 }
 
-/* Barres joueurs haut/bas */
 .game-top-bar {
   width: 100%; padding: 6px 12px;
   display: flex; align-items: center; justify-content: space-between;
@@ -155,7 +154,6 @@ input:checked + .toggle-slider::before { transform: translateX(24px); }
   flex-shrink: 0; gap: 8px; min-height: 50px;
 }
 
-/* Zone centrale : plateau + dé */
 .board-area {
   flex: 1; display: flex; flex-direction: column;
   align-items: center; justify-content: center;
@@ -179,7 +177,7 @@ input:checked + .toggle-slider::before { transform: translateX(24px); }
   flex-shrink: 0;
 }
 
-/* ─── DÉ — STYLE ET ANIMATIONS AMÉLIORÉS ─────────────── */
+/* ─── DÉ — STYLE ET ANIMATIONS ───────────────────────── */
 .dice-area {
   display: flex; align-items: center; justify-content: center;
   margin-top: 8px; flex-shrink: 0;
@@ -222,7 +220,6 @@ input:checked + .toggle-slider::before { transform: translateX(24px); }
   box-shadow: 0 2px 5px rgba(0,0,0,0.15);
 }
 
-/* Animations CSS du lancer */
 .dice.rolling {
   animation: diceRoll 0.6s ease-in-out infinite;
   pointer-events: none;
@@ -246,7 +243,6 @@ input:checked + .toggle-slider::before { transform: translateX(24px); }
   100% { transform: scale(1); }
 }
 
-/* Barre joueurs bas (juste les chips verts/jaunes) */
 .game-bottom-bar {
   width: 100%; padding: 6px 12px;
   display: flex; align-items: center; justify-content: space-between;
@@ -254,7 +250,6 @@ input:checked + .toggle-slider::before { transform: translateX(24px); }
   flex-shrink: 0; gap: 8px; min-height: 50px;
 }
 
-/* Chips joueurs */
 .player-chip {
   display: flex; align-items: center; gap: 8px;
   background: rgba(255,255,255,.07); border-radius: 20px; padding: 5px 10px;
