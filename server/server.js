@@ -11,10 +11,8 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
-// 1. Accès au dossier public (situé un dossier au-dessus)
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-// 2. Redirection vers index.html
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
@@ -44,10 +42,11 @@ function startGame(room, roomCode) {
       const socketId = humanSockets[i];
       const s = room.sockets[socketId];
       s.data.color = col;
-      room.state.players[col] = { pseudo: s.data.pseudo, isBot: false };
+      // Ajout de l'identifiant socket.id pour la synchronisation client
+      room.state.players[col] = { pseudo: s.data.pseudo, id: socketId, isBot: false };
     } else {
       botColors.push(col);
-      room.state.players[col] = { pseudo: `Bot ${col.toUpperCase()}`, isBot: true };
+      room.state.players[col] = { pseudo: `Bot ${col.toUpperCase()}`, id: null, isBot: true };
     }
   });
 
@@ -76,7 +75,14 @@ function checkBotTurn(room, roomCode) {
     const rollRes = processDiceRoll(room.state, turn);
     if (!rollRes.ok) return;
 
-    io.to(roomCode).emit('dice_rolled', { color: turn, dice: rollRes.dice, gameState: serializeState(room.state) });
+    io.to(roomCode).emit('dice_rolled', {
+      color: turn,
+      dice: rollRes.dice,
+      moves: rollRes.moves || [],
+      skipped: rollRes.skipped || false,
+      autoPass: rollRes.autoPass || false,
+      gameState: serializeState(room.state)
+    });
 
     if (rollRes.skipped || rollRes.autoPass) {
       io.to(roomCode).emit('turn_changed', { turn: room.state.turn, gameState: serializeState(room.state) });
@@ -93,8 +99,9 @@ function checkBotTurn(room, roomCode) {
         io.to(roomCode).emit('pawn_moved', {
           color: turn,
           pawnId: chosen.pawnId,
-          move: moveRes.move,
+          steps: moveRes.steps || moveRes.move,
           captures: moveRes.captures,
+          replay: moveRes.replay || false,
           gameState: serializeState(room.state),
         });
 
@@ -110,10 +117,9 @@ function checkBotTurn(room, roomCode) {
 
 io.on('connection', (socket) => {
 
-  // CRÉER UN SALON
   socket.on('create_room', ({ pseudo, playerCount, withBots }) => {
     const code = generateRoomCode();
-    const color = 'red'; // Le créateur est Rouge par défaut
+    const color = 'red';
     const token = Math.random().toString(36).substring(2);
 
     socket.data = { pseudo, roomCode: code, color, token };
@@ -132,7 +138,6 @@ io.on('connection', (socket) => {
 
     socket.join(code);
 
-    // Alignement complet avec menu.js
     socket.emit('room_created', {
       code,
       color,
@@ -146,7 +151,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // REJOINDRE UN SALON
   socket.on('join_room', ({ code, pseudo }) => {
     const room = getRoom(code);
     if (!room) return socket.emit('error', { message: 'Salon introuvable.' });
@@ -166,7 +170,7 @@ io.on('connection', (socket) => {
 
     const playersData = {};
     Object.values(room.sockets).forEach(s => {
-      playersData[s.data.color] = { pseudo: s.data.pseudo, isBot: false };
+      playersData[s.data.color] = { pseudo: s.data.pseudo, id: s.id, isBot: false };
     });
 
     io.to(code).emit('player_joined', {
@@ -180,7 +184,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // LANCER DE DÉ
   socket.on('roll_dice', () => {
     const room = getRoom(socket.data.roomCode);
     if (!room || !room.started) return;
@@ -189,7 +192,15 @@ io.on('connection', (socket) => {
     const res = processDiceRoll(room.state, color);
     if (!res.ok) return socket.emit('error', { message: res.reason });
 
-    io.to(room.code).emit('dice_rolled', { color, dice: res.dice, gameState: serializeState(room.state) });
+    // Transmission explicite des champs réclamés par le client
+    io.to(room.code).emit('dice_rolled', {
+      color,
+      dice: res.dice,
+      moves: res.moves || [],
+      skipped: res.skipped || false,
+      autoPass: res.autoPass || false,
+      gameState: serializeState(room.state)
+    });
 
     if (res.skipped || res.autoPass) {
       io.to(room.code).emit('turn_changed', { turn: room.state.turn, gameState: serializeState(room.state) });
@@ -201,8 +212,9 @@ io.on('connection', (socket) => {
           io.to(room.code).emit('pawn_moved', {
             color,
             pawnId: res.autoMove.pawnId,
-            move: moveRes.move,
+            steps: moveRes.steps || moveRes.move,
             captures: moveRes.captures,
+            replay: moveRes.replay || false,
             gameState: serializeState(room.state),
           });
           if (moveRes.gameOver) {
@@ -215,7 +227,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // DÉPLACER UN PION
   socket.on('move_pawn', ({ pawnId }) => {
     const room = getRoom(socket.data.roomCode);
     if (!room || !room.started) return;
@@ -227,8 +238,9 @@ io.on('connection', (socket) => {
     io.to(room.code).emit('pawn_moved', {
       color,
       pawnId,
-      move: res.move,
+      steps: res.steps || res.move,
       captures: res.captures,
+      replay: res.replay || false,
       gameState: serializeState(room.state),
     });
 
@@ -239,7 +251,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // REVANCHE
   socket.on('request_rematch', () => {
     const room = getRoom(socket.data.roomCode);
     if (!room) return;
@@ -262,7 +273,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // DÉCONNEXION
   socket.on('disconnect', () => {
     const room = getRoom(socket.data.roomCode);
     if (!room) return;
