@@ -1,7 +1,62 @@
 'use strict';
 /* ═══════════════════════════════════════════════════════════════════
-   GAME.JS — Correction affichage dé, rendu pions & déblocage tours
+   GAME.JS — Code complet (Correction de l'affichage du dé)
    ═══════════════════════════════════════════════════════════════════ */
+
+// ── SYSTÈME AUDIO SYNTHÉTIQUE (Web Audio API) ───────────────────────
+const AudioFx = (() => {
+  let ctx = null;
+
+  function init() {
+    if (!ctx) {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) ctx = new AudioCtx();
+    }
+    if (ctx && ctx.state === 'suspended') {
+      ctx.resume();
+    }
+  }
+
+  function playTone(freq, type, duration, vol = 0.1) {
+    if (!ctx) return;
+    try {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, ctx.currentTime);
+      gain.gain.setValueAtTime(vol, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + duration);
+    } catch (e) {}
+  }
+
+  return {
+    init,
+    playClick: () => { init(); playTone(600, 'triangle', 0.05, 0.1); },
+    playDiceRoll: () => { init(); playTone(300, 'square', 0.08, 0.05); },
+    playStep: () => { init(); playTone(440, 'sine', 0.08, 0.1); },
+    playSix: () => { 
+      init(); 
+      playTone(523.25, 'sine', 0.1, 0.15);
+      setTimeout(() => playTone(659.25, 'sine', 0.15, 0.15), 100);
+    },
+    playCapture: () => {
+      init();
+      playTone(150, 'sawtooth', 0.2, 0.2);
+    },
+    playVictory: () => {
+      init();
+      [261.63, 329.63, 392.00, 523.25].forEach((f, i) => {
+        setTimeout(() => playTone(f, 'sine', 0.2, 0.15), i * 120);
+      });
+    }
+  };
+})();
+
+// ── MOTEUR VISUEL ET RÉSEAU DU JEU ───────────────────────────────────
 const Game = (() => {
   const canvas = document.getElementById('ludo-board');
   const ctx    = canvas.getContext('2d');
@@ -12,12 +67,11 @@ const Game = (() => {
   let animating = false, isDiceRolling = false;
 
   const PAL = {
-    green:  { main:'#3cb043', light:'#6dd672', dark:'#267328', bg:'#e8f8e9', home:'#3cb043' },
-    red:    { main:'#e02020', light:'#ff5555', dark:'#a01010', bg:'#fdeaea', home:'#e02020' },
-    blue:   { main:'#2060e0', light:'#5090ff', dark:'#1040a0', bg:'#eaeffd', home:'#2060e0' },
-    yellow: { main:'#e0b800', light:'#ffe040', dark:'#a08000', bg:'#fdf8e1', home:'#e0b800' },
+    green:  { main:'#3cb043', light:'#6dd672', dark:'#267328', bg:'#e8f8e9' },
+    red:    { main:'#e02020', light:'#ff5555', dark:'#a01010', bg:'#fdeaea' },
+    blue:   { main:'#2060e0', light:'#5090ff', dark:'#1040a0', bg:'#eaeffd' },
+    yellow: { main:'#e0b800', light:'#ffe040', dark:'#a08000', bg:'#fdf8e1' },
   };
-  const COLOR_NAMES = { green:'Vert', red:'Rouge', blue:'Bleu', yellow:'Jaune' };
   const DICE_SYMBOLS = { 1:'⚀', 2:'⚁', 3:'⚂', 4:'⚃', 5:'⚄', 6:'⚅' };
 
   let SZ = 40;
@@ -29,8 +83,7 @@ const Game = (() => {
     const vh = window.innerHeight;
     const topBarH = parseInt(getComputedStyle(document.querySelector('.game-top-bar'))?.height) || 52;
     const botBarH = parseInt(getComputedStyle(document.querySelector('.game-bottom-bar'))?.height) || 80;
-    const bannerH = 36;
-    const available = Math.min(vw - 8, vh - topBarH - botBarH - bannerH - 20);
+    const available = Math.min(vw - 8, vh - topBarH - botBarH - 50);
     SZ = Math.max(20, Math.floor(available / N));
     const size = SZ * N;
     canvas.width  = size;
@@ -79,6 +132,7 @@ const Game = (() => {
       blue:   {x:7*s, y:7*s, w:4*s, h:4*s, color:'blue'},
       yellow: {x:0,   y:7*s, w:4*s, h:4*s, color:'yellow'},
     };
+
     Object.entries(bases).forEach(([color, b]) => {
       ctx.fillStyle = PAL[color].bg;
       ctx.fillRect(b.x, b.y, b.w, b.h);
@@ -103,10 +157,8 @@ const Game = (() => {
       ctx.strokeRect(x, y, s, s);
 
       const startColorEntry = Object.entries(START_ABS).find(([_, pos]) => pos === idx);
-
       if (startColorEntry) {
-        const colorKey = startColorEntry[0];
-        ctx.fillStyle = PAL[colorKey].main;
+        ctx.fillStyle = PAL[startColorEntry[0]].main;
         ctx.font = `${s*0.65}px serif`;
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText('★', x+s/2, y+s/2);
@@ -118,16 +170,15 @@ const Game = (() => {
       }
     });
 
-    const stairColors = { green: PAL.green.main, red: PAL.red.main, blue: PAL.blue.main, yellow: PAL.yellow.main };
     Object.entries(STAIRS_CELLS).forEach(([color, cells]) => {
       cells.slice(0, 5).forEach(([c, r], stepIdx) => {
         const x = c*s, y = r*s;
-        ctx.fillStyle = stairColors[color] + '55';
+        ctx.fillStyle = PAL[color].main + '55';
         ctx.fillRect(x, y, s, s);
-        ctx.strokeStyle = stairColors[color]; ctx.lineWidth = 1;
+        ctx.strokeStyle = PAL[color].main; ctx.lineWidth = 1;
         ctx.strokeRect(x, y, s, s);
 
-        ctx.fillStyle = stairColors[color];
+        ctx.fillStyle = PAL[color].main;
         ctx.font = `bold ${Math.max(9, s*0.25)}px Nunito, sans-serif`;
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(stepIdx + 1, x + s/2, y + s/2);
@@ -151,32 +202,38 @@ const Game = (() => {
   function getPawnCanvasPos(pawn, color) {
     if (!pawn) return null;
     const s = SZ;
+
     if (pawn.state === 'base') {
       const slot = BASE_SLOTS[color]?.[pawn.id];
       if (!slot) return null;
       return { x: slot[0]*s + s/2, y: slot[1]*s + s/2 };
     }
+
     if (pawn.state === 'track') {
-      if (pawn.trackPos === undefined || pawn.trackPos < 0) return null;
-      const abs = (START_ABS[color] + pawn.trackPos) % 52;
+      const relPos = pawn.trackPos;
+      if (relPos === undefined || relPos < 0) return null;
+      const abs = (START_ABS[color] + relPos) % 52;
       const cell = TRACK[abs];
       if (!cell) return null;
-      
+
       const stack = getPawnsOnAbsCell(abs);
       const off = getCenteringOffset(stack, color, pawn.id);
       return { x: cell[0]*s + s/2 + off.x, y: cell[1]*s + s/2 + off.y };
     }
+
     if (pawn.state === 'stairs') {
-      const posIdx = Math.min(Math.max(0, pawn.stairsPos || 0), 4);
-      const cell = STAIRS_CELLS[color]?.[posIdx];
+      const stepIndex = Math.min(Math.max(0, (pawn.stairsPos || 1) - 1), 4);
+      const cell = STAIRS_CELLS[color]?.[stepIndex];
       if (!cell) return { x: 5*s+s/2, y: 5*s+s/2 };
       return { x: cell[0]*s + s/2, y: cell[1]*s + s/2 };
     }
+
     if (pawn.state === 'finished') {
       const offsets = { green:[-s*0.22,-s*0.22], red:[s*0.22,-s*0.22], blue:[s*0.22,s*0.22], yellow:[-s*0.22,s*0.22] };
       const [ox, oy] = offsets[color] || [0,0];
       return { x: 5*s+s/2+ox, y: 5*s+s/2+oy };
     }
+
     return null;
   }
 
@@ -215,6 +272,7 @@ const Game = (() => {
         });
       }
     });
+
     if (overridePawn) {
       drawPawn(overridePawn.x, overridePawn.y, overridePawn.color, overridePawn.id + 1, false);
     }
@@ -227,7 +285,8 @@ const Game = (() => {
         if (!pos) return;
         ctx.beginPath();
         ctx.arc(pos.x, pos.y, SZ*0.42, 0, Math.PI*2);
-        ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
+        ctx.strokeStyle = '#ffffff'; 
+        ctx.lineWidth = 3;
         ctx.stroke();
       });
     }
@@ -252,7 +311,7 @@ const Game = (() => {
   }
 
   function animatePawnSteps(color, pawnId, steps, callback) {
-    if (!steps || steps.length === 0 || !window.animEnabled) { callback(); return; }
+    if (!steps || steps.length === 0) { callback(); return; }
     let stepIdx = 0;
 
     function doStep() {
@@ -260,9 +319,14 @@ const Game = (() => {
       const step = steps[stepIdx++];
       const s = SZ;
       let targetPos;
+
       if (step.type === 'track') {
         const abs = (START_ABS[color] + step.rel) % 52;
         const cell = TRACK[abs];
+        targetPos = { x: cell[0]*s + s/2, y: cell[1]*s + s/2 };
+      } else if (step.type === 'stairs') {
+        const stepIndex = Math.min(Math.max(0, step.pos - 1), 4);
+        const cell = STAIRS_CELLS[color][stepIndex];
         targetPos = { x: cell[0]*s + s/2, y: cell[1]*s + s/2 };
       } else {
         targetPos = { x: 5*s + s/2, y: 5*s + s/2 };
@@ -270,9 +334,9 @@ const Game = (() => {
 
       const pawn = state.pawns[color][pawnId];
       const startPos = getPawnCanvasPos(pawn, color) || targetPos;
-      if (typeof Audio !== 'undefined' && Audio.playStep) Audio.playStep();
+      AudioFx.playStep();
 
-      const duration = Math.min(180, 600 / steps.length);
+      const duration = Math.min(180, 500 / steps.length);
       const start = performance.now();
       const override = { color, id: pawnId, x: startPos.x, y: startPos.y };
 
@@ -294,14 +358,16 @@ const Game = (() => {
   function triggerDiceRollAnimation(finalDiceValue, onComplete) {
     const diceEl = $('dice');
     const faceEl = $('dice-face');
+
     if (!diceEl || !faceEl) { 
       isDiceRolling = false;
-      onComplete(); 
+      if (onComplete) onComplete(); 
       return; 
     }
 
     isDiceRolling = true;
     diceEl.classList.add('rolling');
+    AudioFx.playDiceRoll();
 
     let rollCount = 0;
     const maxRolls = 10;
@@ -313,9 +379,9 @@ const Game = (() => {
       if (rollCount >= maxRolls) {
         clearInterval(interval);
         diceEl.classList.remove('rolling');
-        faceEl.textContent = DICE_SYMBOLS[finalDiceValue] || '🎲';
+        faceEl.textContent = DICE_SYMBOLS[finalDiceValue] || String(finalDiceValue);
         isDiceRolling = false;
-        onComplete();
+        if (onComplete) onComplete();
       }
     }, 50);
   }
@@ -335,6 +401,7 @@ const Game = (() => {
       if (!pos) continue;
       const dist = Math.sqrt((mx-pos.x)**2 + (my-pos.y)**2);
       if (dist <= SZ * 0.48) {
+        AudioFx.playClick();
         waitingForPawn = false;
         pendingMoves   = [];
         socket.emit('move_pawn', { pawnId: pawn.id });
@@ -370,7 +437,7 @@ const Game = (() => {
       const isMyTurn = state.turn === myColor;
       const isBot = state.players && state.players[state.turn]?.isBot;
       if (isMyTurn) {
-        banner.textContent = state.diceRolled ? '👆 Choisissez un pion' : '🎲 Lancer le dé';
+        banner.textContent = state.diceRolled ? '👆 Choisissez un cheval' : '🎲 À votre tour : lancez le dé !';
         banner.className   = 'turn-banner my-turn';
       } else {
         const pseudo = (state.players && state.players[state.turn]?.pseudo) || state.turn;
@@ -381,9 +448,11 @@ const Game = (() => {
 
     const diceEl = $('dice');
     const faceEl = $('dice-face');
-    if (diceEl && faceEl && !isDiceRolling) {
-      faceEl.textContent = state.dice ? DICE_SYMBOLS[state.dice] : '🎲';
-      const canRoll = (state.turn === myColor) && !state.diceRolled && state.phase === 'playing' && !animating;
+    if (diceEl && faceEl) {
+      if (state.dice && !isDiceRolling) {
+        faceEl.textContent = DICE_SYMBOLS[state.dice] || String(state.dice);
+      }
+      const canRoll = (state.turn === myColor) && !state.diceRolled && state.phase === 'playing' && !animating && !isDiceRolling;
       diceEl.classList.toggle('disabled', !canRoll);
     }
   }
@@ -395,15 +464,14 @@ const Game = (() => {
 
     switch (event) {
       case 'dice_rolled': {
-        triggerDiceRollAnimation(data.dice, () => {
+        const diceVal = data.dice || (state ? state.dice : 1);
+        triggerDiceRollAnimation(diceVal, () => {
+          if (diceVal === 6) AudioFx.playSix();
+
           if (data.skipped || data.autoPass) {
             waitingForPawn = false;
             pendingMoves = [];
-            updateUI(); 
-            render();
-            return;
-          }
-          if (data.moves?.length > 0 && data.color === myColor) {
+          } else if (data.moves?.length > 0 && data.color === myColor) {
             pendingMoves   = data.moves;
             waitingForPawn = true;
           }
@@ -414,12 +482,15 @@ const Game = (() => {
       }
 
       case 'pawn_moved': {
-        const { color, pawnId, steps } = data;
+        const { color, pawnId, steps, captures } = data;
         animating = true;
         waitingForPawn = false;
         pendingMoves   = [];
 
         animatePawnSteps(color, pawnId, steps || [], () => {
+          if (captures && captures.length > 0) {
+            AudioFx.playCapture();
+          }
           animating = false;
           render();
           updateUI();
@@ -438,11 +509,18 @@ const Game = (() => {
 
       case 'game_start':
       case 'game_started':
+        AudioFx.playVictory();
         animating      = false;
         waitingForPawn = false;
         isDiceRolling  = false;
         pendingMoves   = [];
         updateUI(); 
+        render();
+        break;
+
+      case 'game_over':
+        AudioFx.playVictory();
+        updateUI();
         render();
         break;
     }
@@ -469,6 +547,7 @@ const Game = (() => {
     if (diceBtn) {
       diceBtn.onclick = (e) => {
         e.preventDefault();
+        AudioFx.init();
         if (animating || isDiceRolling) return;
         if (!state || state.phase !== 'playing') return;
         if (state.turn !== myColor || state.diceRolled) return;
