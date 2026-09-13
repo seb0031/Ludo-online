@@ -1,22 +1,17 @@
 'use strict';
 
 const COLORS = ['green', 'red', 'blue', 'yellow'];
-const START_IDX = { green: 10, red: 20, blue: 30, yellow: 40 };
+// Synchronisé avec START_ABS du frontend
+const START_IDX = { red: 10, blue: 20, yellow: 30, green: 40 };
 const SAFE_ABS = [0, 8, 13, 21, 26, 34, 39, 47];
 
 function createPawn(color, id) {
-  return {
-    id,
-    color,
-    state: 'base',
-    trackPos: -1,
-    stairsPos: -1,
-  };
+  return { id, color, state: 'base', trackPos: -1, stairsPos: -1 };
 }
 
 function createGameState(playerCount, withBots, botColors) {
   const pawns = {};
-  COLORS.forEach(c => { pawns[c] = [0,1,2,3].map(i => createPawn(c, i)); });
+  COLORS.forEach(c => { pawns[c] = [0, 1, 2, 3].map(i => createPawn(c, i)); });
   return {
     pawns,
     players: {},
@@ -53,7 +48,7 @@ function getPossibleMoves(state, color, dice) {
     }
 
     if (pawn.state === 'track') {
-      const STAIRS_ENTRY = 51;
+      const STAIRS_ENTRY = 50; // Case juste avant de revenir sur son départ (51 pas max)
       const newRel = pawn.trackPos + dice;
 
       if (newRel <= STAIRS_ENTRY) {
@@ -61,14 +56,16 @@ function getPossibleMoves(state, color, dice) {
         moves.push({ pawnId: pawn.id, type: 'move_track', ...landing });
       } else {
         const stairsAdvance = newRel - STAIRS_ENTRY - 1;
-        if (stairsAdvance <= 5) {
+        if (stairsAdvance <= 4) {
           moves.push({ pawnId: pawn.id, type: 'enter_stairs', stairsPos: stairsAdvance });
-        } else if (stairsAdvance === 6) {
+        } else if (stairsAdvance === 5) {
           moves.push({ pawnId: pawn.id, type: 'finish' });
         } else {
-          const bounced = Math.max(0, 12 - stairsAdvance);
-          if (bounced <= 5) moves.push({ pawnId: pawn.id, type: 'enter_stairs', stairsPos: bounced });
-          else moves.push({ pawnId: pawn.id, type: 'move_track', newRel: STAIRS_ENTRY - (stairsAdvance - 6), bounce: true });
+          // Rebond si trop grand
+          const over = stairsAdvance - 5;
+          const bounced = 5 - over;
+          if (bounced >= 0) moves.push({ pawnId: pawn.id, type: 'enter_stairs', stairsPos: bounced });
+          else moves.push({ pawnId: pawn.id, type: 'move_track', newRel: STAIRS_ENTRY - (over - 5), bounce: true });
         }
       }
       return;
@@ -76,13 +73,13 @@ function getPossibleMoves(state, color, dice) {
 
     if (pawn.state === 'stairs') {
       const target = pawn.stairsPos + dice;
-      if (target === 6) {
+      if (target === 5) {
         moves.push({ pawnId: pawn.id, type: 'finish' });
-      } else if (target < 6) {
+      } else if (target < 5) {
         moves.push({ pawnId: pawn.id, type: 'move_stairs', stairsPos: target });
       } else {
-        const over = target - 6;
-        const bounced = 6 - over;
+        const over = target - 5;
+        const bounced = 5 - over;
         if (bounced >= 0) moves.push({ pawnId: pawn.id, type: 'move_stairs', stairsPos: bounced, bounce: true });
       }
     }
@@ -92,15 +89,10 @@ function getPossibleMoves(state, color, dice) {
 }
 
 function calcTrackLanding(state, color, fromRel, startRel, dice) {
-  let newRel = startRel + dice;
-  if (fromRel === -1) newRel = 0;
-
+  let newRel = (fromRel === -1) ? 0 : startRel + dice;
   const abs = absPos(color, newRel);
 
-  const ownOnCell = state.pawns[color].filter(p =>
-    p.state === 'track' && p.trackPos === newRel
-  ).length;
-
+  const ownOnCell = state.pawns[color].filter(p => p.state === 'track' && p.trackPos === newRel).length;
   const enemyOnCell = COLORS.filter(c => c !== color).flatMap(c =>
     state.pawns[c].filter(p => p.state === 'track' && absPos(c, p.trackPos) === abs)
   );
@@ -132,11 +124,10 @@ function applyMove(state, color, pawnId, moveType, extra) {
   } else if (moveType === 'move_track') {
     const from = pawn.trackPos;
     let target = extra.newRel;
-    const ownAt = state.pawns[color].filter(p =>
-      p.id !== pawnId && p.state === 'track' && p.trackPos === target
-    );
+    const ownAt = state.pawns[color].filter(p => p.id !== pawnId && p.state === 'track' && p.trackPos === target);
+
     if (ownAt.length > 0) {
-      target = target - 1;
+      target = target - 1; // S'arrête juste derrière son propre pion
     } else {
       const abs = absPos(color, target);
       if (!isSafe(abs)) {
@@ -155,7 +146,7 @@ function applyMove(state, color, pawnId, moveType, extra) {
     pawn.trackPos = target;
 
   } else if (moveType === 'enter_stairs') {
-    steps = buildTrackSteps(color, pawn.trackPos, 51);
+    steps = buildTrackSteps(color, pawn.trackPos, 50);
     pawn.state = 'stairs';
     pawn.trackPos = -1;
     pawn.stairsPos = extra.stairsPos;
@@ -165,7 +156,7 @@ function applyMove(state, color, pawnId, moveType, extra) {
 
   } else if (moveType === 'finish') {
     pawn.state = 'finished';
-    pawn.stairsPos = 6;
+    pawn.stairsPos = 5;
   }
 
   return { captures, bounced, steps };
